@@ -163,7 +163,7 @@ class LSTMEyeScorer:
         }
     
     @torch.no_grad()
-    def batch_predict(self, df):
+    def batch_predict(self, df, return_spatial_metrics=False):
         """
         Run perception model on a batch of pitches.
         
@@ -174,10 +174,11 @@ class LSTMEyeScorer:
         
         Args:
             df: DataFrame with Statcast columns needed by calculate_trajectory
+            return_spatial_metrics: If True, also computes uncertainty_vol and log_uncertainty_vol.
             
         Returns:
             results: DataFrame with columns: mu_x, mu_z, sigma_x, sigma_z, 
-                     rho, plus original index
+                     rho, (optional uncertainty_vol, log_uncertainty_vol) plus original index
         """
         sequences = []
         valid_lengths = []
@@ -221,6 +222,13 @@ class LSTMEyeScorer:
             'sigma_z': decision_params[:, 3],
             'rho': decision_params[:, 4],
         }, index=indices)
+        
+        if return_spatial_metrics:
+            u_vol = self.compute_uncertainty_vol(
+                results['sigma_x'].values, results['sigma_z'].values, results['rho'].values
+            )
+            results['uncertainty_vol'] = u_vol
+            results['log_uncertainty_vol'] = np.log(u_vol + 1e-6)
         
         return results
     
@@ -295,6 +303,39 @@ class LSTMEyeScorer:
         bvn = LSTMEyeScorer._bvn_cdf
         p_strike = bvn(u2, v2, rho) - bvn(u1, v2, rho) - bvn(u2, v1, rho) + bvn(u1, v1, rho)
         return np.clip(p_strike, 0.0, 1.0)
+
+    @staticmethod
+    def compute_uncertainty_vol(sigma_x, sigma_z, rho=None):
+        """
+        Computes the 2D Gaussian differential entropy / spatial uncertainty volume proxy:
+            U = sqrt(det(Sigma)) = sigma_x * sigma_z * sqrt(max(1 - rho^2, 1e-6))
+        """
+        sigma_x = np.maximum(sigma_x, 1e-6)
+        sigma_z = np.maximum(sigma_z, 1e-6)
+        if rho is None:
+            return sigma_x * sigma_z
+        rho = np.clip(rho, -0.999999, 0.999999)
+        return sigma_x * sigma_z * np.sqrt(np.maximum(1.0 - rho**2, 1e-6))
+
+    @staticmethod
+    def compute_mahalanobis_edge_dist(mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot,
+                                      rho=None, sz_width=17/12):
+        """
+        Distance from (mu_x, mu_z) to the nearest rectangular strike zone boundary,
+        normalized by directional standard deviation.
+        """
+        sigma_x = np.maximum(sigma_x, 1e-6)
+        sigma_z = np.maximum(sigma_z, 1e-6)
+        
+        x_min = -sz_width / 2.0
+        x_max = sz_width / 2.0
+        
+        # Horizontal edge distance
+        d_x = np.minimum(np.abs(mu_x - x_min), np.abs(mu_x - x_max)) / sigma_x
+        # Vertical edge distance
+        d_z = np.minimum(np.abs(mu_z - sz_bot), np.abs(mu_z - sz_top)) / sigma_z
+        
+        return np.minimum(d_x, d_z)
     
     def score_batter(self, df_batter):
         """

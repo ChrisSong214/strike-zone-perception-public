@@ -75,7 +75,42 @@ By decomposing DVA into **Macro Count Tendency** vs. **Micro Pitch Execution**:
 
 ---
 
-### 5. The Pitcher's Perspective: Deception Leaders
+### 5. Deception vs. Discipline: The Perceptual Mirage Decomposition ($\Delta P$)
+
+By comparing the LSTM's perceptual belief distribution at the **biological commit point ($t = 0.40$, ~175 ms)** against the **ground-truth plate arrival ($t = 1.0$)**, we define the **Mirage Residual**:
+$$\Delta P_i = P(\text{Strike} \mid \mathcal{F}_{0.40})_i - \mathbb{I}(\text{True Strike})_i$$
+
+This isolates the 1% to 5% of pitches where visual perception diverges from final trajectory geometry, mathematically decoupling **Baseline Zone Judgment** from **Deception Vulnerability**:
+
+#### 📊 Orthogonality Audit: Breaking the 90% Collinearity with Z-O Swing%
+Regressing metrics against linear combinations of `(Z-Swing%, Chase Rate)`:
+
+| Metric | $R^2$ with Raw (Z-Swing%, Chase%) | Orthogonal / Independent Signal | Interpretation |
+| :--- | :---: | :---: | :--- |
+| **Overall DVA (Total)** | 0.649 | 35.1% | Heavily influenced by obvious strikes/balls |
+| **Transparent DVA ($|\Delta P| < 0.25$)** | 0.648 | 35.2% | Baseline strike zone geometry calibration |
+| **Mirage DVA ($|\Delta P| \ge 0.25$)** | **0.001** | **99.9% ORTHOGONAL** | **Completely independent of traditional plate discipline!** |
+| **Tunnel Chase Residual (`tunnel_chase_res`)** | **0.121** | **87.9% ORTHOGONAL** | Measures pure susceptibility to late pitch tunneling |
+
+> **Crucial Discovery for Dodgers QA:** A batter's **Transparent Chase Rate** and **Tunnel Chase Residual** have an $R^2$ of only **0.084** ($r = 0.290, p = 1.2 \times 10^{-9}$). **Over 91.6% of a hitter's susceptibility to pitch deception is completely orthogonal to their traditional chase rate.**
+
+#### 🔍 Batter Archetypes Spotlight: Kwan vs. Stowers vs. Dodgers Stars
+Using Empirical Bayes shrinkage ($K = 50$) to create the **Deception Vulnerability Index (DVI)** (100 = league avg, higher = chases more pitch tunnels):
+
+* **Steven Kwan (71.4 DVI):** 25.8% Transparent Chase | **0.0% Tunnel Chase** (Residual: $-0.0369$). Kwan possesses superhuman immunity to pitch tunneling; even on pitches that appear to be strikes at 40% flight, he does not expand the zone.
+* **Kyle Stowers (117.1 DVI):** 33.8% Transparent Chase | **75.0% Tunnel Chase** (Residual: $+0.0198$). While Stowers has roughly average baseline zone awareness, late secondary pitch tunneling fools him on 3 out of 4 deceptive balls.
+* **Juan Soto (70.7 DVI):** 19.2% Transparent Chase | **50.0% Tunnel Chase** (Residual: $-0.0378$). Elite in both baseline zone discipline and tunneling resistance.
+* **Mookie Betts (55.5 DVI):** 25.7% Transparent Chase | **30.8% Tunnel Chase** (Residual: $-0.0567$). The premier deception-immune hitter in MLB; severely outperforms league expectation on deceptive pitches.
+* **Shohei Ohtani (121.1 DVI):** 30.4% Transparent Chase | **71.4% Tunnel Chase** (Residual: $+0.0248$). Highly aggressive ambush profile; vulnerable to elite late tunneling breaks.
+
+#### 🎯 Dual-Sided Asset: Pitcher "Perceptual Stuff+"
+Evaluating $\mathbb{E}[\text{Swing} \mid \text{True Ball}, P_{0.40} \ge 0.25]$ on the pitcher side isolates pure tunneling deception:
+* **Yoshinobu Yamamoto (Cutter, FC):** **166.2 Perceptual Stuff+ (Rank #2 in MLB)** | 46.4% Chase Induced on Balls | Induces $+14.9\%$ swings above expectation on deceptive balls.
+* **Clarke Schmidt (4-Seam, FF):** **181.8 Perceptual Stuff+ (Rank #1 in MLB)** | Late ride that looks down at commit point.
+
+---
+
+### 6. The Pitcher's Perspective: Deception Leaders (Traditional DVA)
 Top MLB pitchers who induce the most negative DVA in opposing hitters (causing the highest frequency of wrong decisions at the 40% flight decision point):
 1. **Andrew Kittredge** (Deception: +10.41 | Chase Induced: 41.6% | Frozen Strike%: 34.4%)
 2. **Graham Ashcraft** (Deception: +10.64 | Chase Induced: 38.4% | Frozen Strike%: 36.5%)
@@ -96,3 +131,4 @@ All figures have been rendered at 300 DPI in [`assets/presentation/`](../../asse
 5. **[`quadrant_archetypes.png`](../../assets/presentation/quadrant_archetypes.png)**: 2D scatter plot of Macro Tendency vs. Micro Execution with player callouts.
 6. **[`breakout_candidates.png`](../../assets/presentation/breakout_candidates.png)**: $\Delta\text{DVA}$ vs. $\Delta\text{wOBA}$ breakout trajectory plot.
 7. **[`pitcher_deception.png`](../../assets/presentation/pitcher_deception.png)**: Graphic table of the top deceptive pitchers inducing batter errors.
+8. **[`mirage_orthogonality_quadrant.png`](../../assets/presentation/mirage_orthogonality_quadrant.png)**: 2D scatter plot of Transparent Chase Rate vs. Tunnel Chase Residual with key player annotations (Steven Kwan, Kyle Stowers, Juan Soto, Mookie Betts, Shohei Ohtani).

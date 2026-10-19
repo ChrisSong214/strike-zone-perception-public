@@ -98,3 +98,34 @@ def test_lstm_qualification_usable_pitch_threshold():
     assert saved_records[0]['batter_id'] == 200
     assert saved_records[0]['n_pitches'] == 200
 
+
+def test_compute_uncertainty_vol():
+    """Verify uncertainty volume formula U = sigma_x * sigma_z * sqrt(max(1 - rho^2, 1e-6))."""
+    # Uncorrelated
+    u1 = LSTMEyeScorer.compute_uncertainty_vol(0.1, 0.2, 0.0)
+    assert np.isclose(u1, 0.02)
+    
+    # Correlated rho = 0.6: sqrt(1 - 0.36) = 0.8 -> 0.1 * 0.2 * 0.8 = 0.016
+    u2 = LSTMEyeScorer.compute_uncertainty_vol(0.1, 0.2, 0.6)
+    assert np.isclose(u2, 0.016)
+    
+    # Vectorized
+    sx = np.array([0.1, 0.2])
+    sz = np.array([0.2, 0.3])
+    r = np.array([0.0, 0.8])
+    u_vec = LSTMEyeScorer.compute_uncertainty_vol(sx, sz, r)
+    assert np.isclose(u_vec[0], 0.02)
+    assert np.isclose(u_vec[1], 0.2 * 0.3 * 0.6)
+
+
+def test_compute_mahalanobis_edge_dist():
+    """Verify Mahalanobis distance to strike zone edges."""
+    # Pitch right on center x=0, z=2.5, zone [-0.7083, 0.7083] x [1.5, 3.5]
+    # Dist to horizontal edge = 0.7083 / 0.1 = 7.083
+    # Dist to vertical edge = min(|2.5-1.5|, |2.5-3.5|) / 0.1 = 1.0 / 0.1 = 10.0
+    dist = LSTMEyeScorer.compute_mahalanobis_edge_dist(
+        mu_x=0.0, mu_z=2.5, sigma_x=0.1, sigma_z=0.1, sz_top=3.5, sz_bot=1.5
+    )
+    assert np.isclose(dist, 17.0 / 24.0 / 0.1)
+
+

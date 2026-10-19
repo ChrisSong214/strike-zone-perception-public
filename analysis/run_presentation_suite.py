@@ -17,6 +17,7 @@ ANALYSES = [
     ("Out-of-Sample Predictive Power", "analysis/predictive_validity.py", True),
     ("Sample Size Stabilization Curve", "analysis/stabilization_analysis.py", False),
     ("Macro vs Micro Talent Quadrants", "analysis/quadrant_analysis.py", False),
+    ("Perceptual Mirage Decomposition", "scripts/run_mirage_decomposition.py", False),
     ("Historical Breakouts & Declines", "analysis/breakout_detection.py", False),
     ("Pitcher Deception & Induced Errors", "analysis/pitcher_deception.py", False),
 ]

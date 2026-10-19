@@ -138,6 +138,13 @@ def derive_features(df):
     # Count as single int (for features)
     df['count_code'] = df['balls'] * 10 + df['strikes']
     
+    # True strike ground truth based on rulebook plate arrival zone
+    df['true_strike'] = (
+        (df['plate_x'].abs() <= 0.833) & 
+        (df['plate_z'] >= df['sz_bot']) & 
+        (df['plate_z'] <= df['sz_top'])
+    ).astype(int)
+    
     return df
 
 
@@ -221,12 +228,22 @@ def add_lstm_features(df, scorer, chunk_size=10000, year=None):
         rho=df['lstm_rho'].values
     )
     
+    # Uncertainty volume & Mirage delta
+    u_vol = LSTMEyeScorer.compute_uncertainty_vol(
+        df['lstm_sigma_x'].values, df['lstm_sigma_z'].values, df['lstm_rho'].values
+    )
+    df['uncertainty_vol'] = u_vol
+    df['log_uncertainty_vol'] = np.log(u_vol + 1e-6)
+    df['mirage_delta'] = df['lstm_p_strike'] - df['true_strike']
+    
     # Diagnostic: show that the decision point has meaningful uncertainty
     print(f"\n  Decision-point perception diagnostics:", flush=True)
     print(f"    Mean \u03c3x: {df['lstm_sigma_x'].mean():.4f} ft ({df['lstm_sigma_x'].mean()*12:.2f} in)", flush=True)
     print(f"    Mean \u03c3z: {df['lstm_sigma_z'].mean():.4f} ft ({df['lstm_sigma_z'].mean()*12:.2f} in)", flush=True)
+    print(f"    Mean Uncertainty Vol: {df['uncertainty_vol'].mean():.6f}", flush=True)
     print(f"    P(Strike) range: [{df['lstm_p_strike'].quantile(0.05):.3f}, {df['lstm_p_strike'].quantile(0.95):.3f}]", flush=True)
     print(f"    P(Strike) mean:  {df['lstm_p_strike'].mean():.3f}", flush=True)
+    print(f"    Mirage Pitches (|ΔP| >= 0.25): {(df['mirage_delta'].abs() >= 0.25).mean():.1%}", flush=True)
     
     # Verify uncertainty is not near-zero (which would mean hindsight)
     mean_sigma = (df['lstm_sigma_x'].mean() + df['lstm_sigma_z'].mean()) / 2
@@ -277,6 +294,8 @@ def main():
                              '(0=release, 1=plate, default=0.40 ~ 175ms after release, decision point)')
     parser.add_argument('--skip-lstm', action='store_true',
                         help='Skip LSTM inference (use only context features)')
+    parser.add_argument('--output', type=str, default=None,
+                        help='Optional custom output parquet path (default: data/training/swing_features_{year}.parquet)')
     args = parser.parse_args()
     
     years = parse_years(args.years, args.positional_years)
@@ -318,7 +337,7 @@ def main():
             # Location
             'plate_x', 'plate_z', 'sz_top', 'sz_bot', 'zone', 'statcast_zone',
             'loc_x_norm', 'loc_z_norm', 'dist_from_center',
-            'in_zone', 'loc_bin',
+            'in_zone', 'loc_bin', 'true_strike',
             # Game state
             'outs_when_up', 'inning', 'runners_on', 'score_diff',
             # LSTM features (if available)
@@ -327,14 +346,15 @@ def main():
         if scorer is not None:
             feature_cols += [
                 'lstm_mu_x', 'lstm_mu_z', 'lstm_sigma_x', 'lstm_sigma_z',
-                'lstm_rho', 'lstm_p_strike',
+                'lstm_rho', 'lstm_p_strike', 'uncertainty_vol', 'log_uncertainty_vol',
+                'mirage_delta',
             ]
         
         # Keep only existing columns
         feature_cols = [c for c in feature_cols if c in df.columns]
         out_df = df[feature_cols].copy()
         
-        outpath = os.path.join(OUTPUT_DIR, f'swing_features_{year}.parquet')
+        outpath = args.output if args.output else os.path.join(OUTPUT_DIR, f'swing_features_{year}.parquet')
         out_df.to_parquet(outpath, index=False)
         
         print(f"\n  Saved: {outpath}")
