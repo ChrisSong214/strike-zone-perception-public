@@ -1,0 +1,64 @@
+{
+  "n": 822,
+  "component_correlation": 0.9113779500613108,
+  "dva_reconstruction_r2": 0.9056103069088419,
+  "forecasts": {
+    "base": {
+      "r2": 0.15581075805161715,
+      "rmse": 0.03323859577881857
+    },
+    "base_dva": {
+      "r2": 0.16654046932603972,
+      "rmse": 0.033026687707838516
+    },
+    "strong": {
+      "r2": 0.14928588655946995,
+      "rmse": 0.03336680169333372
+    },
+    "strong_dva": {
+      "r2": 0.14519168780850655,
+      "rmse": 0.033446996875945184
+    }
+  },
+  "folds": [
+    {
+      "year": 2023,
+      "n": 270,
+      "rmse": {
+        "base": 0.03369907533747634,
+        "base_dva": 0.033445312672899824,
+        "strong": 0.03475214451250772,
+        "strong_dva": 0.034806556820625785
+      }
+    },
+    {
+      "year": 2024,
+      "n": 285,
+      "rmse": {
+        "base": 0.03433667563338747,
+        "base_dva": 0.03414496138174982,
+        "strong": 0.03397360813364779,
+        "strong_dva": 0.034156374121325106
+      }
+    },
+    {
+      "year": 2025,
+      "n": 267,
+      "rmse": {
+        "base": 0.031534568219743396,
+        "base_dva": 0.03134393553557075,
+        "strong": 0.03121374169488698,
+        "strong_dva": 0.031203763595685965
+      }
+    }
+  ],
+  "input_csv_sha256": {
+    "data/leaderboards/2020_dva_leaderboard.csv": "82c2c7e3a275ce4717e29ef4838fa08fb3a6ee41fb52835911019d5c51dd46f6",
+    "data/leaderboards/2021_dva_leaderboard.csv": "bee99b1c2cbf8267ad717a09e5bc4f491966eb110d309266a5072e9b86d3dbb5",
+    "data/leaderboards/2022_dva_leaderboard.csv": "320aa035a87e08b4f2cb782bfbcc496a25ba496bf746ef67ba5c5eb1281c3f0d",
+    "data/leaderboards/2023_dva_leaderboard.csv": "a7871b4b634f25dc951932a4f97081a695ebb8a7353afcb040bf1ce15a812fd7",
+    "data/leaderboards/2024_dva_leaderboard.csv": "59795ddb0a6f2ca990be157b6878cdbfd3090b106a3a4f3959697e193694c7ff",
+    "data/leaderboards/2025_dva_leaderboard.csv": "bf952d5b4e8f7d30b6ca6b65d64519f4d6e4e461279d098d85d4ee152d7508f1"
+  },
+  "scope_note": "Exploratory temporal validation of the aggregate regression only. Upstream DVA/LSTM temporal training provenance not verified; requires both seasons qualified."
+}
