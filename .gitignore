@@ -103,6 +103,7 @@ data/training/*
 # Logs & Scratch
 # ==============================================================================
 *.log
+logs/
 analysis/scratch/*
 !analysis/scratch/.gitkeep
 scratch/

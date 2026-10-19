@@ -67,7 +67,7 @@ def load_pitches(year):
     df = pd.read_sql_query(query, conn)
     conn.close()
     
-    print(f"Loaded {len(df)} pitches with complete physics for {year}")
+    print(f"Loaded {len(df)} pitches with complete physics for {year}", flush=True)
     return df
 
 
@@ -138,7 +138,7 @@ def build_training_data(year):
             elapsed = time.time() - start_time
             rate = i / elapsed
             eta = (n_pitches - i) / rate
-            print(f"  [{year}] {i:,}/{n_pitches:,} ({rate:,.0f} pitches/s, ETA: {eta:.0f}s)")
+            print(f"  [{year}] {i:,}/{n_pitches:,} ({rate:,.0f} pitches/s, ETA: {eta:.0f}s)", flush=True)
         
         seq, vlen, ok = trajectory_to_tensor(row)
         
@@ -159,7 +159,7 @@ def build_training_data(year):
             fail_count += 1
     
     elapsed = time.time() - start_time
-    print(f"  [{year}] Done: {success_count:,} succeeded, {fail_count:,} failed in {elapsed:.1f}s")
+    print(f"  [{year}] Done: {success_count:,} succeeded, {fail_count:,} failed in {elapsed:.1f}s", flush=True)
     
     # Trim to actual count (remove pre-allocated but unused slots)
     sequences = sequences[:success_count]
@@ -202,28 +202,82 @@ def build_training_data(year):
     
     torch.save(data, output_path)
     file_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-    print(f"  Saved {output_path} ({file_size_mb:.1f} MB)")
+    print(f"  [{year}] Saved {output_path} ({file_size_mb:.1f} MB)", flush=True)
     
     return success_count
 
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        years = [int(y) for y in sys.argv[1:]]
-    else:
-        years = [2025]
+def parse_years(years_arg, positional_years):
+    tokens = []
+    if positional_years:
+        tokens.extend(positional_years)
+    if years_arg:
+        tokens.append(years_arg)
     
-    print(f"Building training data for years: {years}")
-    print(f"Sequence length: {SEQ_LEN}, Features: {N_FEATURES}")
-    print(f"Output directory: {OUTPUT_DIR}")
-    print()
+    if not tokens:
+        return [2025]
+        
+    years = []
+    for token in tokens:
+        token = str(token).strip()
+        for part in token.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            if '-' in part:
+                start, end = part.split('-', 1)
+                years.extend(range(int(start), int(end) + 1))
+            else:
+                years.append(int(part))
+    
+    return sorted(list(dict.fromkeys(years)))
+
+
+if __name__ == "__main__":
+    import argparse
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    parser = argparse.ArgumentParser(description="Build Training Data for LSTM+MDN Pitch Perception Model")
+    parser.add_argument('positional_years', nargs='*', type=str, default=None,
+                        help='Positional years (e.g. 2024 2025)')
+    parser.add_argument('--years', type=str, default=None,
+                        help='Years to process (e.g., "2025", "2020-2025", or "2020,2021")')
+    parser.add_argument('--workers', type=int, default=None,
+                        help='Number of parallel workers to process years (default: min(num_years, cpu_count))')
+    args = parser.parse_args()
+
+    years = parse_years(args.years, args.positional_years)
+    
+    print(f"Building training data for years: {years}", flush=True)
+    print(f"Sequence length: {SEQ_LEN}, Features: {N_FEATURES}", flush=True)
+    print(f"Output directory: {OUTPUT_DIR}", flush=True)
+    print(flush=True)
     
     total = 0
-    for year in years:
-        print(f"{'='*50}")
-        print(f"  Processing {year}")
-        print(f"{'='*50}")
-        n = build_training_data(year)
-        total += n
+    if len(years) > 1 and (args.workers is None or args.workers > 1):
+        try:
+            available_cpus = len(os.sched_getaffinity(0))
+        except AttributeError:
+            available_cpus = os.cpu_count() or 1
+        
+        max_workers = args.workers if args.workers is not None else min(len(years), available_cpus)
+        print(f"Processing {len(years)} years across {max_workers} parallel workers...\n", flush=True)
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_year = {executor.submit(build_training_data, y): y for y in years}
+            for future in as_completed(future_to_year):
+                y = future_to_year[future]
+                try:
+                    n = future.result()
+                    total += n
+                except Exception as exc:
+                    print(f"Year {y} generated an exception: {exc}", flush=True)
+                    raise exc
+    else:
+        for year in years:
+            print(f"{'='*50}", flush=True)
+            print(f"  Processing {year}", flush=True)
+            print(f"{'='*50}", flush=True)
+            n = build_training_data(year)
+            total += n
     
-    print(f"\nTotal pitches processed: {total:,}")
+    print(f"\nTotal pitches processed: {total:,}", flush=True)

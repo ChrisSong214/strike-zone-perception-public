@@ -63,6 +63,11 @@ class LSTMEyeScorer:
                 f"Run scripts/train_model.py first."
             )
         
+        if device == 'cuda' and not torch.cuda.is_available():
+            print("Note: CUDA requested but torch.cuda.is_available() is False. Using CPU.", flush=True)
+            device = 'cpu'
+            
+        self.model_path = model_path
         self.device = device
         self.decision_frac = decision_frac
         checkpoint = torch.load(model_path, weights_only=False, map_location=device)

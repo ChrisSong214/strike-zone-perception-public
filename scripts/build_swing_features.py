@@ -141,40 +141,77 @@ def derive_features(df):
     return df
 
 
-def add_lstm_features(df, scorer, chunk_size=10000):
+def add_lstm_features(df, scorer, chunk_size=10000, year=None):
     """Run LSTM inference in memory-bounded chunks and add perception features at the decision point."""
-    print(f"Running LSTM inference on {len(df):,} pitches (chunk size: {chunk_size:,})...")
-    print(f"  Evaluating at {scorer.decision_frac:.0%} through flight (decision point)")
+    print(f"Running LSTM inference on {len(df):,} pitches (chunk size: {chunk_size:,})...", flush=True)
+    print(f"  Evaluating at {scorer.decision_frac:.0%} through flight (decision point)", flush=True)
     t0 = time.time()
     
-    pred_dfs = []
-    n_chunks = (len(df) + chunk_size - 1) // chunk_size
-    for i in range(0, len(df), chunk_size):
-        df_chunk = df.iloc[i:i + chunk_size]
-        chunk_preds = scorer.batch_predict(df_chunk)
-        if not chunk_preds.empty:
-            pred_dfs.append(chunk_preds)
-        chunk_num = i // chunk_size + 1
-        if chunk_num % 5 == 0 or chunk_num == n_chunks:
-            print(f"  Processed chunk {chunk_num}/{n_chunks} ({min(i + chunk_size, len(df)):,}/{len(df):,} pitches)")
-    
-    if not pred_dfs:
-        predictions = pd.DataFrame()
+    traj_path = os.path.join(OUTPUT_DIR, f'trajectories_{year}.pt') if year else None
+    if traj_path and os.path.exists(traj_path):
+        print(f"  Using pre-computed trajectory dataset: {traj_path}...", flush=True)
+        data = torch.load(traj_path, weights_only=False, map_location='cpu')
+        seqs = data['sequences']
+        vlens = data['valid_lengths']
+        labels = data['labels']
+        
+        batch_size = 4096
+        all_decision = []
+        with torch.no_grad():
+            for i in range(0, len(seqs), batch_size):
+                b_seqs = (seqs[i:i+batch_size].to(scorer.device) - scorer.norm_mean) / scorer.norm_std
+                b_vlens = vlens[i:i+batch_size].to(scorer.device)
+                decision_params = scorer.model.predict_at_fraction(
+                    b_seqs, b_vlens, fraction=scorer.decision_frac
+                )
+                all_decision.append(decision_params.cpu())
+                if (i // batch_size) % 10 == 0 or i + batch_size >= len(seqs):
+                    print(f"  Inference progress: {min(i + batch_size, len(seqs)):,}/{len(seqs):,} pitches", flush=True)
+        
+        decision_params = torch.cat(all_decision, dim=0).numpy()
+        preds_df = pd.DataFrame({
+            'game_pk': labels['game_pk'].numpy(),
+            'at_bat_number': labels['at_bat_number'].numpy(),
+            'pitch_number': labels['pitch_number'].numpy(),
+            'lstm_mu_x': decision_params[:, 0],
+            'lstm_mu_z': decision_params[:, 1],
+            'lstm_sigma_x': decision_params[:, 2],
+            'lstm_sigma_z': decision_params[:, 3],
+            'lstm_rho': decision_params[:, 4],
+        })
+        
+        orig_len = len(df)
+        df = df.merge(preds_df, on=['game_pk', 'at_bat_number', 'pitch_number'], how='inner')
+        elapsed = time.time() - t0
+        print(f"  LSTM inference complete: {len(df):,} succeeded in {elapsed:.1f}s", flush=True)
     else:
-        predictions = pd.concat(pred_dfs)
-    
-    elapsed = time.time() - t0
-    n_success = len(predictions)
-    n_fail = len(df) - n_success
-    print(f"  LSTM inference: {n_success:,} succeeded, {n_fail:,} failed in {elapsed:.1f}s")
-    
-    # Merge
-    df = df.loc[predictions.index].copy()
-    df['lstm_mu_x'] = predictions['mu_x']
-    df['lstm_mu_z'] = predictions['mu_z']
-    df['lstm_sigma_x'] = predictions['sigma_x']
-    df['lstm_sigma_z'] = predictions['sigma_z']
-    df['lstm_rho'] = predictions['rho']
+        pred_dfs = []
+        n_chunks = (len(df) + chunk_size - 1) // chunk_size
+        for i in range(0, len(df), chunk_size):
+            df_chunk = df.iloc[i:i + chunk_size]
+            chunk_preds = scorer.batch_predict(df_chunk)
+            if not chunk_preds.empty:
+                pred_dfs.append(chunk_preds)
+            chunk_num = i // chunk_size + 1
+            if chunk_num % 5 == 0 or chunk_num == n_chunks:
+                print(f"  Processed chunk {chunk_num}/{n_chunks} ({min(i + chunk_size, len(df)):,}/{len(df):,} pitches)", flush=True)
+        
+        if not pred_dfs:
+            predictions = pd.DataFrame()
+        else:
+            predictions = pd.concat(pred_dfs)
+        
+        elapsed = time.time() - t0
+        n_success = len(predictions)
+        n_fail = len(df) - n_success
+        print(f"  LSTM inference: {n_success:,} succeeded, {n_fail:,} failed in {elapsed:.1f}s", flush=True)
+        
+        df = df.loc[predictions.index].copy()
+        df['lstm_mu_x'] = predictions['mu_x']
+        df['lstm_mu_z'] = predictions['mu_z']
+        df['lstm_sigma_x'] = predictions['sigma_x']
+        df['lstm_sigma_z'] = predictions['sigma_z']
+        df['lstm_rho'] = predictions['rho']
     
     # Compute LSTM P(Strike) incorporating bivariate correlation rho
     df['lstm_p_strike'] = LSTMEyeScorer.compute_p_strike(
@@ -185,26 +222,55 @@ def add_lstm_features(df, scorer, chunk_size=10000):
     )
     
     # Diagnostic: show that the decision point has meaningful uncertainty
-    print(f"\n  Decision-point perception diagnostics:")
-    print(f"    Mean \u03c3x: {df['lstm_sigma_x'].mean():.4f} ft ({df['lstm_sigma_x'].mean()*12:.2f} in)")
-    print(f"    Mean \u03c3z: {df['lstm_sigma_z'].mean():.4f} ft ({df['lstm_sigma_z'].mean()*12:.2f} in)")
-    print(f"    P(Strike) range: [{df['lstm_p_strike'].quantile(0.05):.3f}, {df['lstm_p_strike'].quantile(0.95):.3f}]")
-    print(f"    P(Strike) mean:  {df['lstm_p_strike'].mean():.3f}")
+    print(f"\n  Decision-point perception diagnostics:", flush=True)
+    print(f"    Mean \u03c3x: {df['lstm_sigma_x'].mean():.4f} ft ({df['lstm_sigma_x'].mean()*12:.2f} in)", flush=True)
+    print(f"    Mean \u03c3z: {df['lstm_sigma_z'].mean():.4f} ft ({df['lstm_sigma_z'].mean()*12:.2f} in)", flush=True)
+    print(f"    P(Strike) range: [{df['lstm_p_strike'].quantile(0.05):.3f}, {df['lstm_p_strike'].quantile(0.95):.3f}]", flush=True)
+    print(f"    P(Strike) mean:  {df['lstm_p_strike'].mean():.3f}", flush=True)
     
     # Verify uncertainty is not near-zero (which would mean hindsight)
     mean_sigma = (df['lstm_sigma_x'].mean() + df['lstm_sigma_z'].mean()) / 2
     if mean_sigma < 0.02:
         print(f"    \u26a0\ufe0f  WARNING: \u03c3 is very small ({mean_sigma:.4f} ft) — model may be\n"
-              f"       evaluating too close to the plate. Consider a lower decision_frac.")
+              f"       evaluating too close to the plate. Consider a lower decision_frac.", flush=True)
     else:
-        print(f"    \u2705 Meaningful uncertainty at decision point (\u03c3 avg = {mean_sigma:.4f} ft)")
+        print(f"    \u2705 Meaningful uncertainty at decision point (\u03c3 avg = {mean_sigma:.4f} ft)", flush=True)
     
     return df
 
 
+def parse_years(years_arg, positional_years):
+    tokens = []
+    if positional_years:
+        tokens.extend(positional_years)
+    if years_arg:
+        tokens.append(years_arg)
+    
+    if not tokens:
+        return [2025]
+        
+    years = []
+    for token in tokens:
+        token = str(token).strip()
+        for part in token.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            if '-' in part:
+                start, end = part.split('-', 1)
+                years.extend(range(int(start), int(end) + 1))
+            else:
+                years.append(int(part))
+    
+    return sorted(list(dict.fromkeys(years)))
+
+
 def main():
     parser = argparse.ArgumentParser(description='Build swing decision features')
-    parser.add_argument('years', nargs='*', type=int, default=[2025])
+    parser.add_argument('positional_years', nargs='*', type=str, default=None,
+                        help='Positional years (e.g. 2024 2025)')
+    parser.add_argument('--years', type=str, default=None,
+                        help='Years to process (e.g., "2025", "2020-2025", or "2020,2021")')
     parser.add_argument('--device', type=str, default='cpu')
     parser.add_argument('--decision-frac', type=float, default=0.40,
                         help='Fraction of flight at which to evaluate perception '
@@ -213,6 +279,12 @@ def main():
                         help='Skip LSTM inference (use only context features)')
     args = parser.parse_args()
     
+    years = parse_years(args.years, args.positional_years)
+    
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        print("Note: CUDA requested but torch.cuda.is_available() is False. Using CPU.", flush=True)
+        args.device = 'cpu'
+
     # Load LSTM model
     scorer = None
     if not args.skip_lstm:
@@ -220,16 +292,16 @@ def main():
     
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
-    for year in args.years:
-        print(f"\n{'='*60}")
-        print(f"  Building swing features for {year}")
-        print(f"{'='*60}")
+    for year in years:
+        print(f"\n{'='*60}", flush=True)
+        print(f"  Building swing features for {year}", flush=True)
+        print(f"{'='*60}", flush=True)
         
         df = load_pitches(year)
         df = derive_features(df)
         
         if scorer is not None:
-            df = add_lstm_features(df, scorer)
+            df = add_lstm_features(df, scorer, year=year)
         
         # Select final columns
         feature_cols = [
