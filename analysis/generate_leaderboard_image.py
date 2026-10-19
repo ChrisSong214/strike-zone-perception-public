@@ -15,13 +15,42 @@ import numpy as np
 
 matplotlib.rcParams['font.family'] = 'sans-serif'
 
-def get_name(uid):
+def get_name(uid, conn=None):
+    if conn is not None:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM player_names WHERE batter_id = ?", (uid,))
+            row = cur.fetchone()
+            if row and row[0] and row[0] != str(uid):
+                return row[0]
+        except Exception:
+            pass
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT batter_name FROM statcast WHERE batter = ? AND batter_name IS NOT NULL AND batter_name != '' LIMIT 1", (uid,))
+            row = cur.fetchone()
+            if row and row[0]:
+                return row[0]
+        except Exception:
+            pass
+
+    try:
+        from pybaseball import playerid_reverse_lookup
+        res = playerid_reverse_lookup([uid], key_type='mlbam')
+        if len(res) > 0 and 'name_first' in res.columns:
+            first = str(res.iloc[0]['name_first']).strip().title()
+            last = str(res.iloc[0]['name_last']).strip().title()
+            return f"{first} {last}"
+    except Exception:
+        pass
+
     url = f"https://statsapi.mlb.com/api/v1/people/{uid}"
     try:
-        req = urllib.request.urlopen(url)
-        data = json.loads(req.read())
-        return data['people'][0]['fullName']
-    except:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read())
+            return data['people'][0]['fullName']
+    except Exception:
         return str(uid)
 
 import argparse
@@ -37,18 +66,26 @@ if "season" not in cols:
     conn.close()
     raise ValueError(f"Table 'swing_ratings' lacks 'season' column; cannot verify season {args.year}.")
 
-season_filter = f"AND season = {args.year}"
-name_col = "player_name" if "player_name" in cols else ("name" if "name" in cols else "NULL as name")
+season_filter = f"AND s.season = {args.year}"
+name_clause = "COALESCE(p.name, s.player_name, s.name)"
+
+# Check if player_names table exists
+cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='player_names'")
+has_pn_table = cursor.fetchone() is not None
+
+join_clause = "LEFT JOIN player_names p ON s.batter_id = p.batter_id" if has_pn_table else ""
+name_select = "COALESCE(p.name, s.player_name, s.name)" if has_pn_table else ("s.player_name" if "player_name" in cols else "s.name")
 
 lb = pd.read_sql_query(f"""
-    SELECT batter_id, swing_rating, tendency_dva, actual_dva, n_pitches, {name_col} as name 
-    FROM swing_ratings 
-    WHERE n_pitches > 500 {season_filter}
-    ORDER BY swing_rating DESC
+    SELECT s.batter_id, s.swing_rating, s.tendency_dva, s.actual_dva, s.n_pitches, {name_select} as name 
+    FROM swing_ratings s
+    {join_clause}
+    WHERE s.n_pitches > 500 {season_filter}
+    ORDER BY s.swing_rating DESC
 """, conn)
-conn.close()
 
 if len(lb) == 0:
+    conn.close()
     print(f"No records found for season {args.year}.")
     exit(0)
 
@@ -63,10 +100,12 @@ for df in [top10, bot10]:
     names = []
     for _, r in df.iterrows():
         n = r.get('name')
-        if pd.isna(n) or not n or n == str(r['batter_id']):
-            n = get_name(int(r['batter_id']))
+        if pd.isna(n) or not n or str(n).strip() == str(r['batter_id']):
+            n = get_name(int(r['batter_id']), conn=conn)
         names.append(n)
     df['name'] = names
+
+conn.close()
 
 def make_table(df, title, filename, color_accent):
     fig, ax = plt.subplots(figsize=(10, 4.5))
@@ -118,4 +157,11 @@ top_file = os.path.join(assets_dir, f"dva_top10{suffix}.png")
 bot_file = os.path.join(assets_dir, f"dva_bottom10{suffix}.png")
 make_table(top10, f'{args.year} DVA Leaders — Top 10', top_file, '#2d6a4f')
 make_table(bot10, f'{args.year} DVA Leaders — Bottom 10', bot_file, '#ae2012')
+
+if args.year == 2025:
+    top_file_2025 = os.path.join(assets_dir, "dva_top10_2025.png")
+    bot_file_2025 = os.path.join(assets_dir, "dva_bottom10_2025.png")
+    make_table(top10, f'{args.year} DVA Leaders — Top 10', top_file_2025, '#2d6a4f')
+    make_table(bot10, f'{args.year} DVA Leaders — Bottom 10', bot_file_2025, '#ae2012')
+
 

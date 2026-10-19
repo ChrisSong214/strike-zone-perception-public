@@ -207,16 +207,31 @@ def main():
         
     lb['season'] = args.year
     
-    # Look up names
+    # Look up names (first check local database, fallback to pybaseball)
+    name_map = {}
     try:
-        from pybaseball import playerid_reverse_lookup
-        all_ids = lb['batter_id'].tolist()
-        names = playerid_reverse_lookup(all_ids, key_type='mlbam')
-        name_map = {int(r['key_mlbam']): f"{r['name_first']} {r['name_last']}" 
-                    for _, r in names.iterrows()}
-        lb['name'] = lb['batter_id'].map(name_map).fillna('Unknown')
+        from src.db_manager import get_db_connection
+        _c = get_db_connection()
+        _df_pn = pd.read_sql_query("SELECT batter_id, name FROM player_names", _c)
+        name_map = dict(zip(_df_pn['batter_id'], _df_pn['name']))
+        _c.close()
     except Exception:
-        lb['name'] = lb['batter_id'].astype(str)
+        pass
+
+    missing_ids = [b for b in lb['batter_id'].tolist() if b not in name_map]
+    if missing_ids:
+        try:
+            from pybaseball import playerid_reverse_lookup
+            names = playerid_reverse_lookup(missing_ids, key_type='mlbam')
+            for _, r in names.iterrows():
+                first = str(r['name_first']).strip().title()
+                last = str(r['name_last']).strip().title()
+                name_map[int(r['key_mlbam'])] = f"{first} {last}"
+        except Exception:
+            pass
+
+    lb['name'] = lb['batter_id'].map(name_map).fillna(lb['batter_id'].astype(str))
+    lb['player_name'] = lb['name']
     
     print(f"\nScored {len(lb)} batters in {elapsed:.1f}s")
     
