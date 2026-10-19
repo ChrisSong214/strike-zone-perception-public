@@ -17,62 +17,54 @@ from scipy.stats import norm
 
 def perceptual_strike_prob(plate_x, plate_z, phys_sigma_x, phys_sigma_z,
                            sz_top, sz_bot, visual_sigma_ft,
-                           sz_width=17/12):
+                           sz_width=17/12, rho=None):
     """
-    Closed-form probability that the batter PERCEIVES the pitch as a strike.
+    Closed-form probability that the batter PERCEIVES the pitch as a strike,
+    supporting correlated cross-axis bivariate Gaussian integration.
     
     The batter's belief about pitch location is a 2D Gaussian:
-        X ~ N(plate_x, sigma_total_x^2)
-        Z ~ N(plate_z, sigma_total_z^2)
+        [X, Z] ~ N([plate_x, plate_z], Sigma_total)
+    where:
+        sigma_total_x = sqrt(phys_sigma_x^2 + visual_sigma_ft^2)
+        sigma_total_z = sqrt(phys_sigma_z^2 + visual_sigma_ft^2)
+        rho is the cross-axis correlation coefficient (defaulting to 0.0).
     
-    where sigma_total = sqrt(sigma_physical^2 + sigma_visual^2)
-    
-    P(Strike) = P(X in zone) * P(Z in zone)  [independent axes]
+    Integrates the bivariate Gaussian over the rectangular strike zone:
+        [-sz_width/2, sz_width/2] x [sz_bot, sz_top].
     """
-    # Total uncertainty = physical + visual (in quadrature)
     total_sigma_x = np.sqrt(phys_sigma_x**2 + visual_sigma_ft**2)
     total_sigma_z = np.sqrt(phys_sigma_z**2 + visual_sigma_ft**2)
     
-    # Avoid division by zero
-    total_sigma_x = np.maximum(total_sigma_x, 1e-6)
-    total_sigma_z = np.maximum(total_sigma_z, 1e-6)
-    
-    # P(X in zone) = CDF(x_max) - CDF(x_min)
-    x_min = -sz_width / 2
-    x_max = sz_width / 2
-    
-    p_x = norm.cdf(x_max, loc=plate_x, scale=total_sigma_x) - \
-          norm.cdf(x_min, loc=plate_x, scale=total_sigma_x)
-    
-    # P(Z in zone) = CDF(sz_top) - CDF(sz_bot)
-    p_z = norm.cdf(sz_top, loc=plate_z, scale=total_sigma_z) - \
-          norm.cdf(sz_bot, loc=plate_z, scale=total_sigma_z)
-    
-    return p_x * p_z
+    from src.lstm_scoring import LSTMEyeScorer
+    res = LSTMEyeScorer.compute_p_strike(
+        mu_x=plate_x, mu_z=plate_z,
+        sigma_x=total_sigma_x, sigma_z=total_sigma_z,
+        sz_top=sz_top, sz_bot=sz_bot,
+        rho=rho, sz_width=sz_width
+    )
+    if isinstance(res, np.ndarray) and res.ndim > 0 and len(res) == 1 and np.isscalar(plate_x):
+        return float(res[0])
+    return res
 
 
 def batch_perceptual_strike_prob(df, visual_sigma_ft):
     """
     Vectorized version of perceptual_strike_prob for a DataFrame of pitches.
-    Returns array of P(Strike) for each pitch.
+    Returns array of P(Strike) for each pitch, honoring cross-axis correlation if present.
     """
     total_sigma_x = np.sqrt(df['phys_sigma_x'].values**2 + visual_sigma_ft**2)
     total_sigma_z = np.sqrt(df['phys_sigma_z'].values**2 + visual_sigma_ft**2)
     
-    total_sigma_x = np.maximum(total_sigma_x, 1e-6)
-    total_sigma_z = np.maximum(total_sigma_z, 1e-6)
+    rho = df['phys_rho'].values if 'phys_rho' in df.columns else None
     
+    from src.lstm_scoring import LSTMEyeScorer
     sz_width = 17 / 12
-    x_min = -sz_width / 2
-    x_max = sz_width / 2
-    
-    p_x = norm.cdf(x_max, loc=df['plate_x'].values, scale=total_sigma_x) - \
-          norm.cdf(x_min, loc=df['plate_x'].values, scale=total_sigma_x)
-    
-    p_z = norm.cdf(df['sz_top'].values, loc=df['plate_z'].values, scale=total_sigma_z) - \
-          norm.cdf(df['sz_bot'].values, loc=df['plate_z'].values, scale=total_sigma_z)
-    
-    return p_x * p_z
+    return LSTMEyeScorer.compute_p_strike(
+        mu_x=df['plate_x'].values, mu_z=df['plate_z'].values,
+        sigma_x=total_sigma_x, sigma_z=total_sigma_z,
+        sz_top=df['sz_top'].values, sz_bot=df['sz_bot'].values,
+        rho=rho, sz_width=sz_width
+    )
 
 
 class FastEyeScorer:

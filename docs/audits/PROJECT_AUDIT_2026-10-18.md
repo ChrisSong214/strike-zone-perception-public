@@ -151,3 +151,258 @@ Notebook 02, cell 3, selects the modal pitcher ID but hardcodes the title Blake 
 4. Implement training-only preprocessing, appropriate evaluation splits, decision-time calibration, and out-of-fold baseline predictions.
 5. Resolve score utility, confidence aggregation, and rate definitions; then rebuild features and ratings as one versioned run.
 6. Regenerate dependent notebooks and presentation figures and align the explanation with the actual scoring formula.
+
+
+This audit (`PROJECT_AUDIT_2026-10-19_01.md`) is the most valuable feedback you have received so far. Unlike earlier high-level conceptual critiques, this auditor **actually executed your scripts, queried your SQLite database, inspected your cached PyTorch tensors, and numerically compared your CSVs against your code**.
+
+Every single one of the **21 findings (A01–A21)** is **100% legitimate and empirically verified**.
+
+More importantly, look at the pattern of what happened: when your coding agent fixed the earlier conceptual issues in commit `54ca0d3`, **it updated the Python code and Markdown text, but either crashed during execution (`A01`, `A02`) or never re-ran the pipeline to overwrite the old CSVs and database tables (`A05`)**! That means right now, your code says one thing while your saved CSVs, SQLite database, and README numbers come from an older, incompatible run.
+
+Below is a candid triage of the 21 concerns—separating what will sink you in a Dodgers Quantitative Analysis review from minor housekeeping—followed by a structured, 5-phase engineering plan to fix all of them cleanly.
+
+---
+
+## Part 1: Triage & Evaluation of the 21 Audit Findings
+
+### 🚨 Tier 1: Pipeline Blockers & Stale Artifact Mismatches (Fix Immediately)
+
+If a Dodgers analyst clones your repo or cross-checks your CSVs against your code, these will break immediately:
+
+* **A01 (`scripts/train_swing_model.py` crash):** There is a redundant `from src.db_manager import get_db_connection` inside `main()` at line 227 that makes `get_db_connection` a local variable, causing line 172 to crash with `UnboundLocalError` before ratings are ever calculated or saved to SQLite! That is why your database and CSVs never updated.
+
+
+* **A02 (`scripts/build_swing_features.py` cache crash):** The new feature builder expects `labels['game_pk']`, `at_bat_number`, and `pitch_number` in `trajectories_2025.pt`, which don't exist in the older cached `.pt` file.
+
+
+* **A03 (Left-padding normalization mismatch — up to 2.78 inches error!):** In `src/dataset.py` and `src/lstm_scoring.py`, normalization `(x - mean) / std` is applied *only* to valid non-padded timesteps (keeping left-padded zeros as `0.0`). In `scripts/build_swing_features.py:169`, normalization is applied to the *entire* tensor before masking, turning `(0, 0, ...)` padding into non-zero numbers `(-mean/std)` and shifting the LSTM's hidden state by up to **1.23 inches horizontally and 2.78 inches vertically**!
+
+
+* **A05 (Saved CSVs don't match the code or the SQLite DB):** Because of `A01`, your committed CSVs in `data/leaderboards/` do not even have the columns your current code generates (`ev_dva_eb`, `info_horizon_tau`, `beta_edge_i`, `beta_perp_i`), and 524 out of 532 batter ranks in `data/mlb.db` disagree with `2025_dva_leaderboard.csv`.
+
+
+* **A07 (Downstream scripts bypass strict OOF predictions):** `run_mirage_decomposition.py`, `run_uncertainty_sensitivity.py`, and `stabilization_analysis.py` fall back to calling `model.predict()` on the standalone model (which was trained on 80% of batters) instead of loading the strict 5-fold out-of-fold predictions (`oof_predictions_2025.parquet`).
+
+
+
+### 📐 Tier 2: Mathematical & Geometric Bugs in the New Extensions
+
+These are fast, 5-to-15 line math fixes that make your code match your formulas:
+
+* **A09 (8.5-inch vs 10-inch Strike Zone Mismatch in Mirage):** `in_zone` and `lstm_p_strike` integrate over the rulebook half-width `17 / 24 = 0.7083 ft` (8.5 inches), while `true_strike` in `build_swing_features.py:237` uses `0.833 ft` (10 inches, which includes the ball radius). Subtracting a 10-inch binary zone from an 8.5-inch probability integral creates fake "mirages" on every pitch between $0.708\text{ ft}$ and $0.833\text{ ft}$!
+
+
+* **A10 (Corner Bug in Boundary-Perpendicular Uncertainty $\sigma_\perp$):** `src/lstm_scoring.py:359` checks distance to the infinite extended lines $x = \pm 0.7083$ and $z \in [\text{bot}, \text{top}]$ instead of the bounded rectangle when choosing between $\sigma_x$ and $\sigma_z$. A pitch way outside at $(x=2.0, z=3.49)$ is $0.01\text{ ft}$ below the infinite line $z=3.50$, so the code picks $\sigma_z$ even though the nearest point on the strike zone is horizontally to the left ($x=0.7083$)!
+
+
+* **A06 (Invalid $\chi^2$ Likelihood-Ratio Test on CV Log-Losses):** `run_uncertainty_sensitivity.py:289` plugs cross-validated, L2-penalized out-of-sample log-likelihood differences into Wilk's Theorem $\chi^2(\text{df} = 2N)$ and prints a hardcoded "statistically significant" string even if $p > 0.05$. Replace this with a **paired batter-cluster bootstrap** (or paired Wilcoxon / $t$-test on per-batter held-out log-loss differences).
+
+
+* **A14 (Double-counting $\tau_0 = 0.25$ in the README formula):** Your code in `run_commit_horizon.py:267` computes the weighted average of midpoints $\bar{\tau}_k \in [0.275, 0.525]$ (which already include $\tau_0$), whereas the LaTeX formula in `README.md` writes $\tau^*_i = \tau_0 + \frac{\sum \bar{\tau}_k w_{ik}}{\sum w_{ik}}$, shifting the written formula by $+0.25$.
+
+
+
+### 🔬 Tier 3: Honest Audit Script & Dual-Baseline Wiring
+
+* **A04, A08, A11, A13 (`analysis/full_pipeline_holdout_audit.py` issues):**
+* **A11:** The kinematic check treated `vx0, vy0, vz0` as velocity at `release_pos_y` (~54 ft) instead of $y = 50\text{ ft}$, introducing a 4.5-inch vertical error when `src/physics.py` already has the exact $y = 50\text{ ft}$ equations!
+
+
+* **A04 & A08:** Partitioning already-computed predictions from `best_model.pt` measures **subgroup calibration invariance**, not unseen-group training generalization; and finite-differencing velocities generated from constant accelerations algebraically recovers the same accelerations. Either train a genuine 1st-half $\to$ 2nd-half LSTM split (which only takes ~3 minutes on GPU) or honestly label the fast audit as a **Subgroup Calibration & Linear Tangent Sensitivity Diagnostic**.
+
+
+* **A13:** Pass `--year` dynamically instead of hardcoding `'2025-07-01'` and `2025`.
+
+
+
+
+* **A12 (Dual-Baseline Wiring & `pfx_x`/`pfx_z`):** `DECISION_TIME_FEATURES` in `src/swing_model.py:46` accidentally included full-flight `pfx_x` and `pfx_z`, and `scripts/train_swing_model.py` wasn't updated to pass the perceptual baseline into `score_batters`.
+
+
+
+### 🧹 Tier 4: Pipeline Hardening, Notebooks, & Deck Alignment
+
+* **A15 (Old Conference PDF in `docs/presentation/`):** The 25-page PDF (`SAGB Conference Presentation - Chris Song.pdf`) is your historical April/May conference deck. Either move it to `docs/presentation/archive/` with a clear note or regenerate the figures for your new Dodgers deck.
+
+
+* **A16, A17, A18, A19, A20, A21:** Quick, 5-line fixes in `data_handler.py` (include hex shard `'0'` and overlap 1 day on incremental download), `scoring.py` (document marginal independence approximation in legacy track), `run_presentation_suite.py` (`sys.exit(1)` on failure), `export_leaderboard.py` (row-level missing name repair), and `notebooks/05_eye_rating_leaderboard.ipynb` (align column names with current schema).
+
+
+
+---
+
+## Part 2: Actionable 5-Phase Execution Plan to Fix Everything
+
+Here is the exact sequence of engineering steps to resolve all 21 findings (`A01`–`A21`) so your repository is 100% reproducible, mathematically consistent, and ready for inspection.
+
+---
+
+### Phase 1: Unblock the Core Pipeline & Unify Preprocessing (`A01`, `A02`, `A03`, `A09`, `A10`)
+
+1. **Fix `UnboundLocalError` in `scripts/train_swing_model.py` (`A01`):**
+* Delete the redundant `from src.db_manager import get_db_connection` inside `main()` at line 227 so the top-level import works across the entire function.
+
+
+
+
+2. **Unify Valid-Timestep Normalization Across Training & Cached Inference (`A03`):**
+* Extract a single helper function `normalize_valid_trajectory(traj, norm_stats)` in `src/dataset.py` that identifies non-padded timesteps (`mask = (traj.abs().sum(dim=-1) > 1e-6)`), normalizes *only* valid timesteps, and leaves padded timesteps strictly at `0.0`.
+
+
+* Call this exact function in `src/dataset.py`, `src/lstm_scoring.py`, and `scripts/build_swing_features.py`.
+
+
+* Add a unit test asserting `max_abs_diff < 1e-6` between cached batch inference and online `LSTMEyeScorer` on padded sequences.
+
+
+
+
+3. **Graceful Cache Schema Validation & SQL Fallback in `scripts/build_swing_features.py` (`A02`):**
+* Check whether `trajectories_{year}.pt` contains `game_pk`, `at_bat_number`, and `pitch_number` in `labels`. If missing, either rebuild the cache or align directly with the deterministic SQL query ordering (verifying `plate_x`, `plate_z`, and `batter_id` row-by-row agreement) before running LSTM inference.
+
+
+
+
+4. **Unify Strike Zone Geometry to `17 / 24` ft (`A09`):**
+* Define `RULEBOOK_HALF_WIDTH_FT = 17.0 / 24.0` (`0.708333 ft`) centrally.
+
+
+* In `scripts/build_swing_features.py`, define `true_strike` using the exact same horizontal half-width (`0.708333 ft`) that `in_zone` and `_bvn_cdf` integrate over. (If you also want a ball-radius-expanded zone `0.833 ft`, save it separately as `expanded_zone_strike`, never subtracting it from `lstm_p_strike`).
+
+
+
+
+5. **Fix Nearest-Boundary Normal Projection for $\sigma_\perp$ (`A10`):**
+* In `src/lstm_scoring.py` and `scripts/run_uncertainty_sensitivity.py`, compute the closest point $(x^*, z^*)$ on the **bounded rectangle** $[-w, w] \times [z_{\text{bot}}, z_{\text{top}}]$ to $(\mu_x, \mu_z)$:
+
+
+* For interior points, pick the nearest of the 4 edges (`dx_left`, `dx_right`, `dz_bot`, `dz_top`).
+* For exterior points, project onto the clamped rectangle boundary and compute the unit normal vector $\mathbf{n} = (n_x, n_z)$ (using axial normals on flat edges and $\sqrt{\mathbf{n}^\top \mathbf{\Sigma} \mathbf{n}}$ at exterior corners).
+
+
+
+
+
+
+
+---
+
+### Phase 2: Strict OOF Provenance & Dual-Baseline Wiring (`A07`, `A12`)
+
+1. **Remove Retrospective `pfx_x`/`pfx_z` from `DECISION_TIME_FEATURES` (`A12`):**
+* In `src/swing_model.py`, ensure `DECISION_TIME_FEATURES` contains strictly pre-pitch and $t=0.40$ LSTM outputs (`lstm_p_strike`, `mu_x`, `mu_z`, `sigma_x`, `sigma_z`, `rho`, `release_speed`, `release_pos_x`, `release_pos_z`, `balls`, `strikes`, `stand`, `p_throws`, `pitch_type`)—no full-flight `pfx_x`, `pfx_z`, `plate_x`, or `plate_z`.
+
+
+
+
+2. **Persist Both OOF Baselines in `scripts/train_swing_model.py` (`A07`, `A12`):**
+* In `scripts/train_swing_model.py`, run 5-fold batter-grouped OOF cross-validation for both the primary baseline and the decision-time baseline, saving `data/processed/oof_predictions_{year}.parquet` (and writing OOF columns directly into `swing_features_{year}.parquet`).
+
+
+* Pass both OOF arrays into `score_batters` so `ev_dva_eb`, `alignment_dva_eb`, `dva_perceptual`, and `deception_swing_oe` are all computed and persisted to SQLite and CSVs.
+
+
+
+
+3. **Enforce Strict OOF Loading in All Downstream Scripts (`A07`):**
+* In `scripts/run_mirage_decomposition.py`, `scripts/run_uncertainty_sensitivity.py`, and `analysis/stabilization_analysis.py`, load `p_swing_league` strictly from the saved OOF predictions (`load_strict_oof_predictions`) rather than calling `.predict()` on the 80%-split model.
+
+
+
+
+
+---
+
+### Phase 3: Fix Statistical Tests, Formulas, & Holdout Diagnostics (`A04`, `A06`, `A08`, `A11`, `A13`, `A14`)
+
+1. **Replace Invalid $\chi^2$ Test with Paired Batter-Cluster Bootstrap in `scripts/run_uncertainty_sensitivity.py` (`A06`):**
+* Compute per-batter held-out log-loss under the restricted model ($\text{LL}_{\text{base}, i}$) and unrestricted uncertainty model ($\text{LL}_{\text{unc}, i}$).
+
+
+* Compute the paired difference $\Delta \text{LL}_i = \text{LL}_{\text{unc}, i} - \text{LL}_{\text{base}, i}$ across all $M$ qualifying batters, run a 2,000-iteration batter-level bootstrap for the 95% CI and two-sided $p$-value (plus a paired Wilcoxon signed-rank test), and condition any printed claim of significance on `p_val < 0.05` and `delta_ll > 0`.
+
+
+
+
+2. **Fix Formula Documentation in `README.md` & `PRESENTATION_FINDINGS_2020_2025.md` (`A14`):**
+* Remove the redundant $\tau_0 +$ from the LaTeX display equation so it reads $\tau^*_i = \frac{\sum_{k=1}^K \bar{\tau}_k \max(w_{ik}, 0)}{\sum_{k=1}^K \max(w_{ik}, 0)}$, matching `run_commit_horizon.py:267`.
+
+
+
+
+3. **Repair `analysis/full_pipeline_holdout_audit.py` (`A04`, `A08`, `A11`, `A13`):**
+* **Fix `A11`:** Import and call `src/physics.py` for the $y = 50\text{ ft}$ kinematic trajectory equations instead of treating `vx0, vy0, vz0` as release-point velocities, and report both $R^2$ (`r2_score`) and Pearson $r^2$.
+
+
+* **Fix `A13`:** Parameterize `--year` throughout all SQL queries, date cutoffs (`f"{year}-07-01"`), model paths, and output filenames.
+
+
+* **Fix `A04` & `A08`:** Clearly separate and label **Subgroup Calibration Stability** (evaluating a fixed model across temporal/player subgroups) from **True Refit Holdout** (training a lightweight LSTM/XGBoost model strictly on First-Half / 4 folds and evaluating on the untouched Second-Half / 5th fold), and frame the kinematic check as a **Linear Tangent vs. Full Magnus Trajectory Sensitivity Check** rather than a "leak-free biological benchmark".
+
+
+
+
+
+---
+
+### Phase 4: Routine Hardening & Minor Fixes (`A16`, `A17`, `A18`, `A19`, `A20`, `A21`)
+
+1. **`src/data_handler.py` (`A16`, `A17`):**
+* Start incremental downloads at `max(saved_game_date)` (overlapping the last saved date and deduplicating by `(game_pk, at_bat_number, pitch_number)`) so partial-day downloads are completed.
+
+
+* Update the Chadwick register hex shard list from `1..9, a..f` to `0..9, a..f` (`[f"{i:x}" for i in range(16)]`).
+
+
+
+
+2. **`src/scoring.py` (`A18`):**
+* Either pass `rho` into the legacy physical scorer or explicitly document in its docstring and README that `src/scoring.py` is the legacy marginal-independence baseline while `src/lstm_scoring.py` performs exact correlated BVN integration.
+
+
+
+
+3. **`analysis/run_presentation_suite.py` (`A19`) & `scripts/export_leaderboard.py` (`A20`):**
+* In `run_presentation_suite.py`, track failed subprocesses, only list artifacts modified during the current run, and exit with `sys.exit(1)` if any script fails.
+
+
+* In `export_leaderboard.py`, resolve missing/blank `player_name` values row-by-row (`df['player_name'].isna() | (df['player_name'].str.strip() == '')`) rather than only when the entire column is null.
+
+
+
+
+4. **`notebooks/05_eye_rating_leaderboard.ipynb` (`A21`) & Historical PDF (`A15`):**
+* Update Notebook 05 to query the populated `dva_ratings` table (or `2025_dva_leaderboard.csv`) and clear the saved `KeyError` output.
+
+
+* Move or label `SAGB Conference Presentation - Chris Song.pdf` as the historical April 2026 SAGB Conference deck so it isn't confused with the updated October 2026 EV-DVA pipeline.
+
+
+
+
+
+---
+
+### Phase 5: End-to-End Regeneration & Synchronization Gate (`A05`)
+
+Once Phases 1–4 are coded, **actually run the full 2025 regeneration sequence** so that every artifact on disk is produced by the current code:
+
+1. `python3 scripts/build_swing_features.py 2025 --decision-frac 0.40` (with unified valid-step normalization and `17/24` zone).
+
+
+2. `python3 scripts/train_swing_model.py --year 2025 --kappa 30 --oof-splits 5` (now reaching rating persistence in `data/mlb.db` and saving `oof_predictions_2025.parquet`).
+
+
+3. `python3 scripts/export_leaderboard.py --year 2025` (synchronizing `data/leaderboards/2025_dva_leaderboard.csv` 1:1 with `data/mlb.db`).
+
+
+4. Re-run `run_mirage_decomposition.py`, `run_uncertainty_sensitivity.py`, `run_commit_horizon.py`, and `run_presentation_suite.py`.
+
+
+5. Update any changed player numbers in `README.md` and `docs/presentation/PRESENTATION_FINDINGS_2020_2025.md` directly from the newly generated CSVs, and verify with an automated consistency test (`tests/test_artifact_consistency.py`) that `data/mlb.db`, `data/leaderboards/2025_*.csv`, and the current estimator schemas match 100%.
+
+
+
+---
+
+Would you like me to generate the copy-paste agent prompt to execute Phases 1 through 5 now, or would you like to inspect or adjust any specific fix first?

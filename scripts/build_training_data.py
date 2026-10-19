@@ -193,6 +193,7 @@ def build_training_data(year):
             'pitch_number': torch.from_numpy(pitch_numbers),   # (N,)
         },
         'metadata': {
+            'cache_version': 2,
             'year': year,
             'seq_len': SEQ_LEN,
             'features': FEATURES,

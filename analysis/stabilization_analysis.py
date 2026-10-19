@@ -52,13 +52,16 @@ def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500,
     # Ensure production DVA metrics (EV-DVA & Alignment DVA) are computed
     if 'ev_dva' not in sub_df.columns:
         print("Scoring pitches with production LeagueSwingModel and BayesianBatterModel...")
+        from src.swing_model import load_baseline_predictions_for_df
+        sub_df = load_baseline_predictions_for_df(sub_df, year=2025, require_oof=False)
         model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model_2025')
         if not os.path.exists(model_path + '.xgb'):
             model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model')
         league_model = LeagueSwingModel()
         league_model.load(model_path)
         bayesian_model = BayesianBatterModel(kappa=30.0)
-        bayesian_model.fit(sub_df, league_model.predict(sub_df))
+        p_swing_base = sub_df['xgb_p_swing'].values if 'xgb_p_swing' in sub_df.columns else league_model.predict(sub_df)
+        bayesian_model.fit(sub_df, p_swing_base)
         sub_df = compute_dva(sub_df, league_model, bayesian_model)
         
     k_star_ev, _, _ = estimate_eb_shrinkage(sub_df, residual_col='ev_dva', batter_col='batter')

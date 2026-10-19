@@ -25,6 +25,7 @@ import pandas as pd
 import torch
 
 from src.lstm_scoring import LSTMEyeScorer
+from src.dataset import normalize_valid_trajectory
 from src.db_manager import get_db_connection
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'training')
@@ -139,11 +140,8 @@ def derive_features(df):
     df['count_code'] = df['balls'] * 10 + df['strikes']
     
     # True strike ground truth based on rulebook plate arrival zone
-    df['true_strike'] = (
-        (df['plate_x'].abs() <= 0.833) & 
-        (df['plate_z'] >= df['sz_bot']) & 
-        (df['plate_z'] <= df['sz_top'])
-    ).astype(int)
+    # Geometrically identical to in_zone (|plate_x| <= 17/24, sz_bot <= plate_z <= sz_top)
+    df['true_strike'] = df['in_zone'].copy()
     
     return df
 
@@ -155,9 +153,24 @@ def add_lstm_features(df, scorer, chunk_size=10000, year=None):
     t0 = time.time()
     
     traj_path = os.path.join(OUTPUT_DIR, f'trajectories_{year}.pt') if year else None
+    use_cached_traj = False
+    data = None
     if traj_path and os.path.exists(traj_path):
+        try:
+            print(f"  Inspecting pre-computed trajectory dataset: {traj_path}...", flush=True)
+            data = torch.load(traj_path, weights_only=False, map_location='cpu')
+            labels = data.get('labels', {})
+            required_keys = ['game_pk', 'at_bat_number', 'pitch_number']
+            if all(k in labels for k in required_keys):
+                use_cached_traj = True
+            else:
+                print(f"  [Notice] Cached trajectory file {traj_path} lacks required keys {required_keys}. "
+                      f"Found keys: {list(labels.keys())}. Falling back to chunked extraction.", flush=True)
+        except Exception as e:
+            print(f"  [Warning] Failed to inspect cached trajectory dataset {traj_path}: {e}. Falling back to chunked extraction.", flush=True)
+
+    if use_cached_traj and data is not None:
         print(f"  Using pre-computed trajectory dataset: {traj_path}...", flush=True)
-        data = torch.load(traj_path, weights_only=False, map_location='cpu')
         seqs = data['sequences']
         vlens = data['valid_lengths']
         labels = data['labels']
@@ -166,8 +179,11 @@ def add_lstm_features(df, scorer, chunk_size=10000, year=None):
         all_decision = []
         with torch.no_grad():
             for i in range(0, len(seqs), batch_size):
-                b_seqs = (seqs[i:i+batch_size].to(scorer.device) - scorer.norm_mean) / scorer.norm_std
+                b_s = seqs[i:i+batch_size].to(scorer.device)
                 b_vlens = vlens[i:i+batch_size].to(scorer.device)
+                
+                # Apply normalization strictly to non-padded timesteps using unified helper
+                b_seqs = normalize_valid_trajectory(b_s, scorer.norm_mean, scorer.norm_std, valid_len=b_vlens)
                 decision_params = scorer.model.predict_at_fraction(
                     b_seqs, b_vlens, fraction=scorer.decision_frac
                 )

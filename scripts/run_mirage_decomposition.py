@@ -161,15 +161,23 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.08, k_shri
         df['uncertainty_vol'] = u_vol
         df['log_uncertainty_vol'] = np.log(u_vol + 1e-6)
 
-    # League swing expectations
+    # League swing expectations (preferring verified OOF predictions)
     if 'p_swing_league' not in df.columns:
-        model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', f'swing_model_{year}')
-        if not os.path.exists(model_path + '.xgb'):
-            model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model_2025')
-        print(f"Loading LeagueSwingModel from {model_path}...")
-        m = LeagueSwingModel()
-        m.load(model_path)
-        df['p_swing_league'] = m.predict(df)
+        if 'xgb_p_swing' in df.columns:
+            df['p_swing_league'] = df['xgb_p_swing']
+        else:
+            from src.swing_model import load_baseline_predictions_for_df
+            df = load_baseline_predictions_for_df(df, year=year, require_oof=False)
+            if 'xgb_p_swing' in df.columns:
+                df['p_swing_league'] = df['xgb_p_swing']
+            else:
+                model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', f'swing_model_{year}')
+                if not os.path.exists(model_path + '.xgb'):
+                    model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model_2025')
+                print(f"Loading LeagueSwingModel from {model_path}...")
+                m = LeagueSwingModel()
+                m.load(model_path)
+                df['p_swing_league'] = m.predict(df)
 
     # Pitch-level Decision Value Added (DVA)
     p_strike = df['lstm_p_strike'].values

@@ -113,7 +113,7 @@ class StatcastDataHandler:
             return pd.read_feather(path)
         else:
             print('Fetching new player metadata...')
-            idx_lst = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'a', 'b', 'c', 'd', 'e', 'f']
+            idx_lst = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'a', 'b', 'c', 'd', 'e', 'f']
             dfs = []
             for i in idx_lst:
                 url = f'https://raw.githubusercontent.com/chadwickbureau/register/master/data/people-{i}.csv'
@@ -179,7 +179,7 @@ class StatcastDataHandler:
                     if 'game_date' in sc_dat_saved.columns:
                         last_saved = sc_dat_saved['game_date'].max()
                         if pd.notna(last_saved):
-                            start_date = (last_saved + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+                            start_date = pd.to_datetime(last_saved).strftime('%Y-%m-%d')
                             is_update = True
                             
                             if pd.to_datetime(start_date) > datetime.datetime.now():
@@ -225,7 +225,12 @@ class StatcastDataHandler:
                 )
             
             if is_update and sc_dat_saved is not None:
-                sc_dat_tmp = pd.concat([sc_dat_saved, sc_dat_tmp], axis=0, ignore_index=True).reset_index(drop=True)
+                combined = pd.concat([sc_dat_saved, sc_dat_tmp], axis=0, ignore_index=True)
+                dedup_cols = ['game_pk', 'at_bat_number', 'pitch_number']
+                if all(col in combined.columns for col in dedup_cols):
+                    sc_dat_tmp = combined.drop_duplicates(subset=dedup_cols, keep='last').reset_index(drop=True)
+                else:
+                    sc_dat_tmp = combined.drop_duplicates(keep='last').reset_index(drop=True)
             
             print(f"Saving {len(sc_dat_tmp)} rows to {year_path}")
             sc_dat_tmp.to_feather(year_path)

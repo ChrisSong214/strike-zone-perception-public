@@ -43,6 +43,8 @@ def main():
     parser.add_argument('--min-pitches', type=int, default=200)
     parser.add_argument('--oof-splits', type=int, default=5,
                         help='Number of out-of-fold batter splits for leak-free baseline scoring (default: 5)')
+    parser.add_argument('--train-perceptual', action='store_true', default=False,
+                        help='Train decision-time perceptual baseline model in addition to final-location model')
     args = parser.parse_args()
     
     print(f"{'='*60}")
@@ -116,12 +118,23 @@ def main():
     league_model.save(os.path.join(MODEL_DIR, 'swing_model'), year=args.year)
     print(f"\n  Model saved: {model_path}.xgb")
     
+    league_model_perceptual = None
+    if args.train_perceptual:
+        print(f"\n--- Training Perceptual Decision-Time Baseline Model ---")
+        league_model_perceptual = LeagueSwingModel(feature_mode='decision_time')
+        league_model_perceptual.train(train_df, val_df)
+        perc_path = os.path.join(MODEL_DIR, f'swing_model_{args.year}_perceptual')
+        league_model_perceptual.save(perc_path, year=args.year)
+        league_model_perceptual.save(os.path.join(MODEL_DIR, 'swing_model_perceptual'), year=args.year)
+        print(f"  Perceptual baseline model saved: {perc_path}.xgb")
+
     # --- 3. Out-Of-Fold Baseline Predictions for Fair Scoring ---
     print(f"\n--- Out-of-Fold Baseline Generation ({args.oof_splits}-fold by Batter) ---")
     if args.oof_splits > 1:
         from sklearn.model_selection import KFold
         kf = KFold(n_splits=args.oof_splits, shuffle=True, random_state=42)
         oof_preds = np.zeros(len(df), dtype=np.float32)
+        oof_preds_perc = np.zeros(len(df), dtype=np.float32) if args.train_perceptual else None
         fold_assignments = np.zeros(len(df), dtype=np.int32)
         
         for fold, (train_b_idx, val_b_idx) in enumerate(kf.split(batters)):
@@ -141,16 +154,26 @@ def main():
             inner_train_mask = df['batter'].isin(inner_train_b)
             inner_val_mask = df['batter'].isin(inner_val_b)
             
-            fold_model = LeagueSwingModel()
+            fold_model = LeagueSwingModel(feature_mode='final_location')
             fold_model.train(df[inner_train_mask], df[inner_val_mask])
             oof_preds[fold_val_mask] = fold_model.predict(df[fold_val_mask])
+
+            if args.train_perceptual:
+                fold_model_perc = LeagueSwingModel(feature_mode='decision_time')
+                fold_model_perc.train(df[inner_train_mask], df[inner_val_mask])
+                oof_preds_perc[fold_val_mask] = fold_model_perc.predict(df[fold_val_mask])
+
             print(f"  Fold {fold+1}/{args.oof_splits} complete ({fold_val_mask.sum():,} pitches, untouched outer holdout)")
             
         df['xgb_p_swing'] = oof_preds
+        if args.train_perceptual:
+            df['xgb_p_swing_perceptual'] = oof_preds_perc
         df['oof_fold'] = fold_assignments
         auc_label = "Out-of-Fold"
     else:
         df['xgb_p_swing'] = league_model.predict(df)
+        if league_model_perceptual is not None:
+            df['xgb_p_swing_perceptual'] = league_model_perceptual.predict(df)
         df['oof_fold'] = 0
         auc_label = "In-Sample"
         
@@ -159,6 +182,8 @@ def main():
     
     # Persist baseline predictions for downstream consumers with explicit provenance
     oof_cols = ['game_pk', 'at_bat_number', 'pitch_number', 'batter', 'oof_fold', 'xgb_p_swing']
+    if 'xgb_p_swing_perceptual' in df.columns:
+        oof_cols.append('xgb_p_swing_perceptual')
     available_oof = [c for c in oof_cols if c in df.columns]
     oof_df = df[available_oof].copy()
     oof_df['is_oof'] = (args.oof_splits > 1)
@@ -212,7 +237,7 @@ def main():
     print(f"\n--- Scoring Batters (DVA) ---")
     
     t0 = time.time()
-    lb = score_batters(df, league_model, bayesian_model, min_pitches=args.min_pitches)
+    lb = score_batters(df, league_model, bayesian_model, min_pitches=args.min_pitches, league_model_perceptual=league_model_perceptual)
     elapsed = time.time() - t0
     
     if len(lb) == 0:
@@ -224,7 +249,6 @@ def main():
     # Look up names (first check local database, fallback to pybaseball)
     name_map = {}
     try:
-        from src.db_manager import get_db_connection
         _c = get_db_connection()
         _df_pn = pd.read_sql_query("SELECT batter_id, name FROM player_names", _c)
         name_map = dict(zip(_df_pn['batter_id'], _df_pn['name']))

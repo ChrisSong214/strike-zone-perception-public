@@ -6,6 +6,10 @@
 
 ---
 
+> [!NOTE]
+> **Methodological Provenance & Authoritative Leaderboards Notice:**
+> The conference PDF deck (`SAGB Conference Presentation - Chris Song.pdf`) is a historical April 2026 conference presentation artifact. Authoritative leaderboards, models, and empirical evaluations reside in `data/leaderboards/` (e.g. `2025_dva_leaderboard.csv`) and SQLite (`data/mlb.db`), produced by the October 2026 production pipeline featuring Empirical Bayes EV-DVA (`ev_dva_eb`, `alignment_dva_eb`), continuous Information-Use Horizons ($\tau^*_i$), and boundary-orthogonal spatial uncertainty ($\sigma_\perp$).
+
 ## 🏆 Key Statistical Takeaways for Conference Slides
 
 ### 1. Sample Size Threshold Sensitivity: Filtering Noise Reveals Pure Talent
@@ -194,7 +198,7 @@ Across 353 qualified hitters in 2025:
 ### 8. Inferring Individual Information-Use Horizons ($\tau^*_i$) & Statcast Bat-Tracking Validation
 
 Instead of assuming every MLB hitter commits to a swing at a static 40% flight, we infer each batter's unique **Information-Use Horizon ($\tau^*_i \in [0.25, 0.55]$)** using a smooth cumulative **Information Center of Mass**:
-$$\tau^*_i = \tau_0 + \frac{\sum_{k=1}^K \bar{\tau}_k \cdot \max(w_{ik}, 0)}{\sum_{k=1}^K \max(w_{ik}, 0)}$$
+$$\tau^*_i = \frac{\sum_{k=1}^K \bar{\tau}_k \cdot \max(w_{ik}, 0)}{\sum_{k=1}^K \max(w_{ik}, 0)}$$
 where $w_{ik}$ are the non-negative ridge regression weights on sequential trajectory updates $\Delta P_{\tau_{k-1} \to \tau_k}$, and $\text{SE}(\tau^*_i)$ is computed in closed form via the delta method.
 
 #### ⏱️ Population Inferred Information-Use Distribution (421 Qualified Hitters in 2025)

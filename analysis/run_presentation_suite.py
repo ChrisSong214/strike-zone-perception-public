@@ -62,13 +62,37 @@ def run_suite(min_pitches=750):
         status_sym = "✓" if status == "SUCCESS" else "✗"
         print(f"  {status_sym} {title:<40} {status:<10} ({elapsed:.1f}s)")
         
-    print("\nGenerated Presentation Assets in assets/presentation/:")
+    print("\nPresentation Assets in assets/presentation/:")
     asset_dir = os.path.join(_PROJECT_ROOT, 'assets', 'presentation')
+    new_assets = []
+    prior_assets = []
     if os.path.exists(asset_dir):
         for f in sorted(os.listdir(asset_dir)):
             if f.endswith(('.png', '.csv')):
-                fsize = os.path.getsize(os.path.join(asset_dir, f)) / 1024
-                print(f"  • {f:<38} ({fsize:.1f} KB)")
+                fpath = os.path.join(asset_dir, f)
+                fsize = os.path.getsize(fpath) / 1024
+                mtime = os.path.getmtime(fpath)
+                if mtime >= t_start:
+                    new_assets.append((f, fsize))
+                else:
+                    prior_assets.append((f, fsize))
+
+    if new_assets:
+        print("  Newly Generated/Updated in this Run:")
+        for f, fsize in new_assets:
+            print(f"    • {f:<38} ({fsize:.1f} KB)")
+    else:
+        print("  (No newly updated assets in this run)")
+
+    if prior_assets:
+        print("  Pre-existing Prior Assets:")
+        for f, fsize in prior_assets:
+            print(f"    • {f:<38} ({fsize:.1f} KB)")
+
+    failures = [r for r in results if r[1] == "FAILED"]
+    if failures:
+        print(f"\n[ERROR] {len(failures)} analysis script(s) failed in presentation suite.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

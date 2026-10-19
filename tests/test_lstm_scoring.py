@@ -170,4 +170,12 @@ def test_compute_boundary_orthogonal_uncertainty():
     assert np.allclose(ed, [half_w - 0.6, 0.1])
     assert np.allclose(sp, [0.15, 0.25])
 
+    # Case 5: Audit finding A10 test case - outside point at (2.0, 3.49) with sigma_x=0.1, sigma_z=0.4
+    # Nearest boundary point is at (half_w, 3.49), so normal points horizontally; sigma_perp must be 0.1, NOT 0.4
+    ed_a10, sp_a10 = LSTMEyeScorer.compute_boundary_orthogonal_uncertainty(
+        mu_x=2.0, mu_z=3.49, sigma_x=0.1, sigma_z=0.4, sz_top=3.5, sz_bot=1.5
+    )
+    assert np.isclose(ed_a10, 2.0 - half_w)
+    assert np.isclose(sp_a10, 0.1)
+
 

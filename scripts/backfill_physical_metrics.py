@@ -21,18 +21,19 @@ def upsert_metrics(conn, records):
     c.executemany('''
         INSERT INTO physical_pitch_metrics (
             game_pk, at_bat_number, pitch_number,
-            phys_prob_strike, phys_sigma_x, phys_sigma_z, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            phys_prob_strike, phys_sigma_x, phys_sigma_z, phys_rho, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(game_pk, at_bat_number, pitch_number) DO UPDATE SET
             phys_prob_strike = excluded.phys_prob_strike,
             phys_sigma_x = excluded.phys_sigma_x,
             phys_sigma_z = excluded.phys_sigma_z,
+            phys_rho = excluded.phys_rho,
             updated_at = excluded.updated_at
     ''', [
         (
             r['game_pk'], r['at_bat_number'], r['pitch_number'],
             r['phys_prob_strike'], r['phys_sigma_x'], r['phys_sigma_z'],
-            str(r['updated_at'])
+            r.get('phys_rho', 0.0), str(r['updated_at'])
         ) for r in records
     ])
     conn.commit()
@@ -68,13 +69,20 @@ def calculate_plate_metrics(cloud_trajs, sz_top, sz_bot, sz_width=17/12):
             in_zone += 1
             
     if not final_x:
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
         
     prob_strike = in_zone / len(final_x)
     sigma_x = float(np.std(final_x))
     sigma_z = float(np.std(final_z))
+    if len(final_x) > 1 and sigma_x > 1e-6 and sigma_z > 1e-6:
+        corr_mat = np.corrcoef(final_x, final_z)
+        rho = float(corr_mat[0, 1])
+        if not np.isfinite(rho):
+            rho = 0.0
+    else:
+        rho = 0.0
     
-    return prob_strike, sigma_x, sigma_z
+    return prob_strike, sigma_x, sigma_z, rho
 
 
 def backfill_constants(years=None, batch_size=1000, resume=True, seed=42):
@@ -95,10 +103,19 @@ def backfill_constants(years=None, batch_size=1000, resume=True, seed=42):
             phys_prob_strike REAL,
             phys_sigma_x REAL,
             phys_sigma_z REAL,
+            phys_rho REAL,
             updated_at TIMESTAMP,
             PRIMARY KEY (game_pk, at_bat_number, pitch_number)
         )
     ''')
+    # Schema migration if phys_rho is missing
+    c.execute("PRAGMA table_info(physical_pitch_metrics)")
+    cols = [col[1] for col in c.fetchall()]
+    if 'phys_rho' not in cols:
+        try:
+            c.execute("ALTER TABLE physical_pitch_metrics ADD COLUMN phys_rho REAL")
+        except Exception:
+            pass
     conn.commit()
     
     existing_keys = set()
@@ -156,7 +173,7 @@ def backfill_constants(years=None, batch_size=1000, resume=True, seed=42):
             pitch_seed = int((seed * 31 + pitch_key[0] * 10007 + pitch_key[1] * 101 + pitch_key[2]) % (2**32 - 1))
             pitch_rng = np.random.RandomState(pitch_seed)
             cloud = generate_pitch_cloud(row, n_samples=25, rng=pitch_rng)
-            prob, sig_x, sig_z = calculate_plate_metrics(cloud, sz_top, sz_bot)
+            prob, sig_x, sig_z, rho = calculate_plate_metrics(cloud, sz_top, sz_bot)
             
             results.append({
                 'game_pk': pitch_key[0],
@@ -165,6 +182,7 @@ def backfill_constants(years=None, batch_size=1000, resume=True, seed=42):
                 'phys_prob_strike': prob,
                 'phys_sigma_x': sig_x,
                 'phys_sigma_z': sig_z,
+                'phys_rho': rho,
                 'updated_at': pd.Timestamp.now()
             })
             if not pd.isna(prob):

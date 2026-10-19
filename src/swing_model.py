@@ -42,8 +42,8 @@ DECISION_TIME_FEATURES = [
     'balls', 'strikes', 'two_strikes',
     # Handedness
     'stand_R', 'p_throws_R', 'platoon',
-    # Pitch kinematics known early
-    'release_speed', 'pfx_x', 'pfx_z',
+    # Pitch kinematics known early (release speed)
+    'release_speed',
     # Game state
     'outs_when_up', 'inning', 'runners_on', 'score_diff',
     # LSTM perception at decision point (t = 0.40)
@@ -594,7 +594,7 @@ def compute_dva(df, league_model, bayesian_model, league_model_perceptual=None):
     return df
 
 
-def score_batters(df, league_model, bayesian_model, min_pitches=200):
+def score_batters(df, league_model, bayesian_model, min_pitches=200, league_model_perceptual=None):
     """
     Produce final batter ratings using Empirical Bayes posterior mean EV-DVA
     and strike-alignment DVA.
@@ -609,7 +609,7 @@ def score_batters(df, league_model, bayesian_model, min_pitches=200):
     Returns:
         DataFrame with one row per batter, sorted by swing_rating.
     """
-    df = compute_dva(df, league_model, bayesian_model)
+    df = compute_dva(df, league_model, bayesian_model, league_model_perceptual=league_model_perceptual)
     
     # Estimate principled Empirical Bayes shrinkage constants K* from pitch-level residual variances
     k_ev, s2_w_ev, t2_b_ev = estimate_eb_shrinkage(df, residual_col='ev_dva', batter_col='batter')
@@ -661,7 +661,7 @@ def score_batters(df, league_model, bayesian_model, min_pitches=200):
         inside_zone  = (batter_df['in_zone'] == 1)
         chase_bin    = (batter_df['loc_bin'] == 'chase')
         
-        results.append({
+        rec = {
             'batter_id':             int(batter_id),
             'n_pitches':             n,
             'dva_mean':              eb_ev,
@@ -680,7 +680,12 @@ def score_batters(df, league_model, bayesian_model, min_pitches=200):
             'deviation_from_league': weighted_dev,
             'chase_deviation':       chase_dev,
             'avg_confidence':        avg_confidence,
-        })
+        }
+        if 'deception_swing_oe' in batter_df.columns:
+            rec['deception_swing_oe'] = float(batter_df['deception_swing_oe'].mean())
+        if 'ev_dva_perceptual' in batter_df.columns:
+            rec['ev_dva_perceptual'] = float(batter_df['ev_dva_perceptual'].mean())
+        results.append(rec)
         
     lb = pd.DataFrame(results)
     if len(lb) == 0:

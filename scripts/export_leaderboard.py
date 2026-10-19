@@ -66,16 +66,19 @@ def main():
     elif not has_player_name and not has_name:
         lb['player_name'] = np.nan
 
-    # If all player names are missing or empty, fetch from MLB stats API
-    valid_names = lb['player_name'].dropna().astype(str).str.strip()
-    if len(valid_names) == 0:
-        print("Fetching names from MLB stats API...")
-        names = []
-        for i, row in lb.iterrows():
-            names.append(get_name(int(row['batter_id'])))
-            if i % 50 == 0 and i > 0:
-                print(f"  Fetched {i}/{len(lb)} names...")
-        lb['player_name'] = names
+    # If player names are missing or empty, fetch from MLB stats API row-by-row
+    needs_name = lb['player_name'].isna() | (lb['player_name'].astype(str).str.strip().isin(['', 'nan', 'None']))
+    if needs_name.any():
+        n_missing = int(needs_name.sum())
+        print(f"Fetching {n_missing} missing names from MLB stats API...")
+        name_cache = {}
+        for count, idx in enumerate(lb[needs_name].index, 1):
+            bid = int(lb.loc[idx, 'batter_id'])
+            if bid not in name_cache:
+                name_cache[bid] = get_name(bid)
+            lb.loc[idx, 'player_name'] = name_cache[bid]
+            if count % 50 == 0:
+                print(f"  Fetched {count}/{n_missing} names...")
 
     # Ensure player_name is the second column (after batter_id or rank)
     cols = [c for c in lb.columns if c != 'player_name']

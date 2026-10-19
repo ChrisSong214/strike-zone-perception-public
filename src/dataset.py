@@ -152,11 +152,47 @@ class PitchTrajectoryDataset(Dataset):
         
         # Apply normalization only to non-padded region
         if self.normalize and self.feature_mean is not None:
-            # Normalize only the valid (non-padded) timesteps
-            start = self.seq_len - valid_len  # padding is at the start
-            if valid_len > 0:
-                seq[start:] = (seq[start:] - self.feature_mean) / self.feature_std
+            seq = normalize_valid_trajectory(seq, self.feature_mean, self.feature_std, valid_len=valid_len)
         
         labels = {k: self.labels[k][idx] for k in self.labels}
         
         return seq, labels, valid_len
+
+
+def normalize_valid_trajectory(seq, feature_mean, feature_std, valid_len=None):
+    """
+    Normalizes only valid (non-padded) timesteps in trajectory tensor,
+    leaving left-padded timesteps strictly at 0.0.
+    
+    Supports:
+        seq: (seq_len, n_features) or (batch_size, seq_len, n_features)
+    """
+    if seq.dim() == 2:
+        seq_len, _ = seq.shape
+        out = seq.clone()
+        if valid_len is not None:
+            start = seq_len - valid_len
+            if valid_len > 0:
+                out[start:] = (out[start:] - feature_mean) / feature_std
+        else:
+            valid_mask = (seq.abs().sum(dim=-1) > 1e-6)
+            if valid_mask.any():
+                out[valid_mask] = (out[valid_mask] - feature_mean) / feature_std
+        return out
+    elif seq.dim() == 3:
+        if valid_len is not None:
+            out = seq.clone()
+            seq_len = seq.shape[1]
+            for i in range(len(seq)):
+                vlen = valid_len[i]
+                start = seq_len - vlen
+                if vlen > 0:
+                    out[i, start:] = (out[i, start:] - feature_mean) / feature_std
+            return out
+        else:
+            valid_mask = (seq.abs().sum(dim=-1) > 1e-6).unsqueeze(-1)
+            normed = (seq - feature_mean) / feature_std
+            return torch.where(valid_mask, normed, torch.zeros_like(seq))
+    else:
+        raise ValueError(f"Expected seq tensor with 2 or 3 dimensions, got {seq.dim()}")
+

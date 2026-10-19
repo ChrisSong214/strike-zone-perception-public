@@ -15,6 +15,27 @@ def test_perceptual_strike_prob_bounds():
     assert prob > 0.5  # Dead-center pitch should have high strike prob
 
 
+def test_perceptual_strike_prob_correlated():
+    """Verify correlated bivariate normal integration in perceptual_strike_prob (resolves A18)."""
+    # Corner-centered pitch: plate_x = 17/24, plate_z = 3.5, phys_sigma = 0.2, visual_sigma = 0.0
+    p_ind = perceptual_strike_prob(
+        plate_x=17/24, plate_z=3.5,
+        phys_sigma_x=0.2, phys_sigma_z=0.2,
+        sz_top=3.5, sz_bot=1.5,
+        visual_sigma_ft=0.0, rho=0.0
+    )
+    assert np.isclose(p_ind, 0.25, atol=1e-3)
+    
+    # Under rho = 0.8, correlated probability is ~0.397584
+    p_corr = perceptual_strike_prob(
+        plate_x=17/24, plate_z=3.5,
+        phys_sigma_x=0.2, phys_sigma_z=0.2,
+        sz_top=3.5, sz_bot=1.5,
+        visual_sigma_ft=0.0, rho=0.8
+    )
+    assert np.isclose(p_corr, 0.397584, atol=1e-4)
+
+
 def test_batch_perceptual_strike_prob():
     df = pd.DataFrame({
         'plate_x': [0.0, 3.0],

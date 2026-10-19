@@ -135,22 +135,31 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
     # Compute Boundary-Orthogonal Uncertainty (sigma_perp) and Euclidean Edge Distance (edge_dist)
     mu_x = df['lstm_mu_x'].values if 'lstm_mu_x' in df.columns else df['plate_x'].values
     mu_z = df['lstm_mu_z'].values if 'lstm_mu_z' in df.columns else df['plate_z'].values
+    rho_val = df['lstm_rho'].values if 'lstm_rho' in df.columns else None
     edge_dist, sigma_perp = compute_boundary_orthogonal_uncertainty(
         mu_x, mu_z, df['lstm_sigma_x'].values, df['lstm_sigma_z'].values,
-        df['sz_top'].values, df['sz_bot'].values
+        df['sz_top'].values, df['sz_bot'].values, rho=rho_val
     )
     df['edge_dist'] = edge_dist
     df['sigma_perp'] = sigma_perp
 
-    # Load baseline league model
+    # Load baseline league model (preferring verified OOF predictions)
     if 'p_swing_league' not in df.columns:
-        model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', f'swing_model_{year}')
-        if not os.path.exists(model_path + '.xgb'):
-            model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model_2025')
-        print(f"Loading LeagueSwingModel from {model_path}...")
-        m = LeagueSwingModel()
-        m.load(model_path)
-        df['p_swing_league'] = m.predict(df)
+        if 'xgb_p_swing' in df.columns:
+            df['p_swing_league'] = df['xgb_p_swing']
+        else:
+            from src.swing_model import load_baseline_predictions_for_df
+            df = load_baseline_predictions_for_df(df, year=year, require_oof=False)
+            if 'xgb_p_swing' in df.columns:
+                df['p_swing_league'] = df['xgb_p_swing']
+            else:
+                model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', f'swing_model_{year}')
+                if not os.path.exists(model_path + '.xgb'):
+                    model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model_2025')
+                print(f"Loading LeagueSwingModel from {model_path}...")
+                m = LeagueSwingModel()
+                m.load(model_path)
+                df['p_swing_league'] = m.predict(df)
 
     df['league_logit'] = np.clip(logit(df['p_swing_league'].values), -6.0, 6.0)
 
@@ -248,6 +257,8 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
     total_brier_B = 0.0
     total_n_eval = 0
 
+    batter_delta_lls = []
+
     for bid in eval_sample:
         sub = b_df[b_df['batter'] == bid]
         y = sub['is_swing'].values
@@ -256,6 +267,9 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
         e_z = sub['edge_dist_z'].values
         u_z = sub['u_zscore'].values
         sp_z = sub['sigma_perp_z'].values
+
+        b_ll_A = 0.0
+        b_ll_B = 0.0
 
         kf = KFold(n_splits=5, shuffle=True, random_state=42)
         for tr, te in kf.split(sub):
@@ -280,23 +294,45 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
             ll_B = -np.sum(np.logaddexp(0, eta_B) - y_te * eta_B)
             brier_B = np.sum((p_B - y_te)**2)
 
+            b_ll_A += ll_A
+            b_ll_B += ll_B
             total_ll_A += ll_A
             total_ll_B += ll_B
             total_brier_A += brier_A
             total_brier_B += brier_B
             total_n_eval += len(te)
 
-    delta_ll = total_ll_B - total_ll_A
-    lr_stat = 2.0 * delta_ll
-    p_value = 1.0 - stats.chi2.cdf(max(lr_stat, 0), df=len(eval_sample) * 2)
-    mean_brier_A = total_brier_A / total_n_eval
-    mean_brier_B = total_brier_B / total_n_eval
+        batter_delta_lls.append(b_ll_B - b_ll_A)
 
-    print(f"Results across {total_n_eval:,} held-out borderline decisions:")
+    delta_ll = total_ll_B - total_ll_A
+    mean_brier_A = total_brier_A / max(total_n_eval, 1)
+    mean_brier_B = total_brier_B / max(total_n_eval, 1)
+
+    # Paired test across clusters (batters)
+    n_batters = len(batter_delta_lls)
+    if n_batters > 1:
+        arr_delta = np.array(batter_delta_lls)
+        mean_d = float(np.mean(arr_delta))
+        std_d = float(np.std(arr_delta, ddof=1))
+        se_d = std_d / np.sqrt(n_batters)
+        t_stat = mean_d / max(se_d, 1e-12)
+        p_value = 2.0 * (1.0 - stats.t.cdf(abs(t_stat), df=n_batters - 1))
+        ci_lower = mean_d - 1.96 * se_d
+        ci_upper = mean_d + 1.96 * se_d
+    else:
+        mean_d, se_d, t_stat, p_value, ci_lower, ci_upper = 0.0, 0.0, 0.0, 1.0, 0.0, 0.0
+
+    print(f"Results across {total_n_eval:,} held-out borderline decisions ({n_batters} batters):")
     print(f"  • Model A Log-Likelihood: {total_ll_A:,.2f} | Brier: {mean_brier_A:.5f}")
     print(f"  • Model B Log-Likelihood: {total_ll_B:,.2f} | Brier: {mean_brier_B:.5f}")
-    print(f"  • Out-of-Sample ΔLL: +{delta_ll:.2f} (Likelihood-Ratio Stat: {lr_stat:.2f}, p = {p_value:.3e})")
-    print(f"  • Statistically significant out-of-sample evidence that spatial covariance uncertainty and boundary orientation add predictive power beyond edge distance alone.")
+    print(f"  • Out-of-Sample ΔLL (Total): {delta_ll:+.2f}")
+    print(f"  • Mean Batter ΔLL: {mean_d:+.4f} (95% CI: [{ci_lower:+.4f}, {ci_upper:+.4f}], t = {t_stat:.2f}, p = {p_value:.4f})")
+    if delta_ll > 0 and p_value < 0.05:
+        print(f"  • Statistically significant out-of-sample evidence (p = {p_value:.4f}) that spatial covariance uncertainty and boundary orientation add predictive power beyond edge distance alone.")
+    elif delta_ll > 0:
+        print(f"  • Positive out-of-sample ΔLL improvement, but not reaching significance threshold alpha=0.05 (p = {p_value:.4f}).")
+    else:
+        print(f"  • No out-of-sample log-likelihood improvement observed from adding spatial covariance uncertainty and boundary orientation (ΔLL = {delta_ll:.2f}, p = {p_value:.4f}).")
 
     # 5. Orthogonality Audit
     print("\n" + "=" * 80)

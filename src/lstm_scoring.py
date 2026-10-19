@@ -339,14 +339,19 @@ class LSTMEyeScorer:
 
     @staticmethod
     def compute_boundary_orthogonal_uncertainty(mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot,
-                                                sz_width=17/12):
+                                                sz_width=17/12, rho=None):
         """
         Computes Euclidean distance to nearest strike zone boundary and boundary-perpendicular standard deviation.
         
+        For points inside the zone, determines the nearest rectangle edge (vertical vs horizontal)
+        and returns the corresponding perpendicular standard deviation (sigma_x or sigma_z).
+        For points outside the zone, projects the point to the closest point on the bounded rectangle
+        and computes the directional standard deviation along the normal vector n:
+            sigma_perp = sqrt(n.T @ Sigma @ n) = sqrt(n_x^2 * sigma_x^2 + 2 * n_x * n_z * rho * sigma_x * sigma_z + n_z^2 * sigma_z^2)
+            
         Returns:
             edge_dist: Euclidean distance from (mu_x, mu_z) to nearest strike-zone boundary
             sigma_perp: Directional standard deviation perpendicular to nearest strike-zone boundary
-                       (sigma_x for vertical left/right edges, sigma_z for horizontal top/bottom edges)
         """
         mu_x = np.asarray(mu_x, dtype=np.float64)
         mu_z = np.asarray(mu_z, dtype=np.float64)
@@ -354,20 +359,43 @@ class LSTMEyeScorer:
         sigma_z = np.asarray(sigma_z, dtype=np.float64)
         sz_top = np.asarray(sz_top, dtype=np.float64)
         sz_bot = np.asarray(sz_bot, dtype=np.float64)
+        if rho is None:
+            rho = np.zeros_like(mu_x, dtype=np.float64)
+        else:
+            rho = np.asarray(rho, dtype=np.float64)
+            if rho.ndim == 0:
+                rho = np.full_like(mu_x, float(rho), dtype=np.float64)
         
         sz_w_half = sz_width / 2.0
-        d_x = np.abs(np.abs(mu_x) - sz_w_half)
-        d_z = np.minimum(np.abs(mu_z - sz_bot), np.abs(mu_z - sz_top))
         
-        sigma_perp = np.where(d_x <= d_z, sigma_x, sigma_z)
-        
+        # Closest point on the rectangular strike zone
         x_clamped = np.clip(mu_x, -sz_w_half, sz_w_half)
         z_clamped = np.clip(mu_z, sz_bot, sz_top)
+        
         inside_mask = (np.abs(mu_x) <= sz_w_half) & (mu_z >= sz_bot) & (mu_z <= sz_top)
         
+        # 1. Inside zone: distance to the 4 edges
+        d_x = sz_w_half - np.abs(mu_x)
+        d_z = np.minimum(np.abs(mu_z - sz_bot), np.abs(mu_z - sz_top))
         dist_inside = np.minimum(d_x, d_z)
-        dist_outside = np.hypot(mu_x - x_clamped, mu_z - z_clamped)
+        sigma_perp_inside = np.where(d_x <= d_z, sigma_x, sigma_z)
+        
+        # 2. Outside zone: normal displacement vector from boundary to point
+        v_x = mu_x - x_clamped
+        v_z = mu_z - z_clamped
+        dist_outside = np.hypot(v_x, v_z)
+        
+        # Unit normal vector
+        denom = np.where(dist_outside > 1e-12, dist_outside, 1.0)
+        n_x = np.where(dist_outside > 1e-12, v_x / denom, 0.0)
+        n_z = np.where(dist_outside > 1e-12, v_z / denom, 0.0)
+        
+        # Directional variance along normal: n.T @ Sigma @ n
+        var_perp = n_x**2 * sigma_x**2 + 2.0 * n_x * n_z * rho * sigma_x * sigma_z + n_z**2 * sigma_z**2
+        sigma_perp_outside = np.sqrt(np.maximum(var_perp, 1e-12))
+        
         edge_dist = np.where(inside_mask, dist_inside, dist_outside)
+        sigma_perp = np.where(inside_mask, sigma_perp_inside, sigma_perp_outside)
         
         return edge_dist, sigma_perp
     
