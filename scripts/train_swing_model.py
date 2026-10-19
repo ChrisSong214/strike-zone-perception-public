@@ -111,9 +111,9 @@ def main():
     # Save model
     os.makedirs(MODEL_DIR, exist_ok=True)
     model_path = os.path.join(MODEL_DIR, f'swing_model_{args.year}')
-    league_model.save(model_path)
+    league_model.save(model_path, year=args.year)
     # Also save as default swing_model
-    league_model.save(os.path.join(MODEL_DIR, 'swing_model'))
+    league_model.save(os.path.join(MODEL_DIR, 'swing_model'), year=args.year)
     print(f"\n  Model saved: {model_path}.xgb")
     
     # --- 3. Out-Of-Fold Baseline Predictions for Fair Scoring ---
@@ -162,6 +162,7 @@ def main():
     available_oof = [c for c in oof_cols if c in df.columns]
     oof_df = df[available_oof].copy()
     oof_df['is_oof'] = (args.oof_splits > 1)
+    oof_df['season'] = int(args.year)
     
     pred_file = f'oof_predictions_{args.year}.parquet' if args.oof_splits > 1 else f'insample_predictions_{args.year}.parquet'
     pred_path = os.path.join(DATA_DIR, pred_file)
@@ -170,12 +171,25 @@ def main():
     
     conn = get_db_connection()
     try:
-        oof_df.to_sql('swing_pitch_predictions', conn, if_exists='replace', index=False)
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='swing_pitch_predictions'")
+        table_exists = cursor.fetchone() is not None
+        if table_exists:
+            cursor.execute("PRAGMA table_info(swing_pitch_predictions)")
+            cols = [col[1] for col in cursor.fetchall()]
+            if 'season' in cols:
+                conn.execute("DELETE FROM swing_pitch_predictions WHERE season = ?", (int(args.year),))
+            else:
+                conn.execute("DROP TABLE swing_pitch_predictions")
+        
+        oof_df.to_sql('swing_pitch_predictions', conn, if_exists='append', index=False)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_pitch_pred ON swing_pitch_predictions (game_pk, at_bat_number, pitch_number)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pitch_pred_season ON swing_pitch_predictions (season)")
         conn.commit()
     except Exception as e:
         print(f"  Note: Could not save predictions to DB: {e}")
-    conn.close()
+    finally:
+        conn.close()
 
     # --- 4. Bayesian Batter Posteriors ---
     print(f"\n--- Hierarchical Bayesian Model (κ={args.kappa}) ---")

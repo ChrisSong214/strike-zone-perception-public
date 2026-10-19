@@ -41,3 +41,60 @@ def test_bvn_cdf_boundary_limits():
     # Near +inf: should approach 1
     val_pos = LSTMEyeScorer._bvn_cdf(10.0, 10.0, 0.5)[0]
     assert np.isclose(val_pos, 1.0, atol=1e-6)
+
+
+def test_lstm_qualification_usable_pitch_threshold():
+    """Verify that production run_leaderboard excludes batters whose surviving usable pitches after scoring are < min_pitches."""
+    import unittest.mock as mock
+    import pandas as pd
+    import scripts.run_eye_rating_lstm as mod
+
+    # Create mock data with 2 batters, each having 200 pitches
+    df_pitches = pd.DataFrame({
+        'batter': [100] * 200 + [200] * 200,
+        'description': ['ball'] * 400,
+        'is_swing': [False] * 400
+    })
+
+    saved_records = []
+    def mock_save(df):
+        saved_records.extend(df.to_dict('records'))
+
+    class MockScorer:
+        def __init__(self, *args, **kwargs):
+            pass
+        def score_batter(self, b_df):
+            bid = b_df['batter'].iloc[0]
+            if bid == 100:
+                # 1 usable, 199 failed
+                return {
+                    'n_pitches': 1,
+                    'n_failed': 199,
+                    'll_per_pitch': -0.693,
+                    'mean_sigma_x': 0.1,
+                    'mean_sigma_z': 0.1,
+                    'swing_rate': 0.5,
+                    'mean_p_strike': 0.5
+                }
+            else:
+                # 200 usable, 0 failed
+                return {
+                    'n_pitches': 200,
+                    'n_failed': 0,
+                    'll_per_pitch': -0.450,
+                    'mean_sigma_x': 0.1,
+                    'mean_sigma_z': 0.1,
+                    'swing_rate': 0.48,
+                    'mean_p_strike': 0.52
+                }
+
+    with mock.patch.object(mod, 'load_pitches', return_value=df_pitches), \
+         mock.patch.object(mod, 'LSTMEyeScorer', MockScorer), \
+         mock.patch.object(mod, 'save_lstm_eye_ratings', mock_save):
+        lb = mod.run_leaderboard(years=[2025], min_pitches=200)
+
+    # Verify that only batter 200 (with 200 usable pitches) reached the save recorder
+    assert len(saved_records) == 1
+    assert saved_records[0]['batter_id'] == 200
+    assert saved_records[0]['n_pitches'] == 200
+

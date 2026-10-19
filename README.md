@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![XGBoost](https://img.shields.io/badge/XGBoost-1.7+-green.svg)](https://xgboost.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-9%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen.svg)]()
 
 > **Research and presentation by Chris Song** presented at the **SABR / SAGB Conference**.  
 > Materials and slides available in [`docs/presentation/`](docs/presentation/).
@@ -21,12 +21,15 @@ In reality, human batters do not possess 20/20 hindsight. Batters must commit to
   <img src="assets/probability_cloud.png" alt="Probability Cloud at the Decision Point" width="90%"/>
 </p>
 
-This repository implements a **deep streaming perception model** and **hierarchical Bayesian decision engine** that evaluates swing decisions based on the information *actually available* to a human batter at the biological decision point:
+This repository implements a **deep streaming perception model** and **hierarchical Bayesian decision engine** that evaluates swing decisions under perceptual uncertainty:
 
 1. **Streaming Trajectory Perception:** An LSTM with a Mixture Density Network (MDN) processes 9D kinematic features $(x, y, z, v_x, v_y, v_z, a_x, a_y, a_z)$ at each millisecond of flight, estimating a 2D Gaussian belief distribution $(\mu_x, \mu_z, \sigma_x, \sigma_z, \rho)$ over plate-crossing location.
 2. **Exact Chebyshev Strike Zone Integration:** At the 40% flight decision point, we evaluate the exact bivariate normal CDF over the rectangular strike zone bounds ($L_\infty$) via Owen's T function, fully incorporating cross-axis spatial correlation $\rho$.
-3. **Context-Aware XGBoost League Baseline:** Predicts league-expected swing probability $P(\text{Swing})_{\text{league}}$ using count, pitcher hand, velocity, movement, and estimated pitch location via batter-grouped out-of-fold cross-validation.
+3. **Context-Aware XGBoost League Baseline:** Predicts league-expected swing probability $P(\text{Swing})_{\text{league}}$ using game situation (balls, strikes), pitcher hand, velocity, movement, and measured final pitch location $(x, z)$ via 5-fold batter-grouped out-of-fold cross-validation.
 4. **Hierarchical Bayesian DVA Scoring:** Evaluates **Decision Value Added (DVA)** by decomposing batter decisions into true-talent swing tendency vs. acute pitch-level execution with empirical Bayes shrinkage.
+
+> [!NOTE]
+> **Scientific Modeling Caveat:** Trajectories are reconstructed from Statcast initial conditions under constant acceleration kinematics to model perceptual uncertainty at the biological decision point. The XGBoost baseline conditions on measured final pitch locations to reflect objective pitch quality under league conditions. DVA measures baseline-adjusted strike-probability agreement rather than a full count-specific run-expectancy utility model.
 
 ---
 
@@ -177,7 +180,7 @@ pip install -e .
 pytest tests/
 ```
 
-All 9 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, and trajectory kinematics.
+All 17 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, trajectory kinematics, FastEyeScorer filtering and minimum observation guards, and strict out-of-fold provenance validation.
 
 ### 3. Export the 2025 Leaderboard
 
@@ -193,9 +196,28 @@ python3 scripts/export_leaderboard.py --year 2025
 
 To retrain and execute the full pipeline from raw Statcast pitches to final DVA ratings:
 
+### Database Setup Prerequisite
+
+Before running training data builders on a fresh checkout, ensure the `statcast` table in `data/mlb.db` is populated.
+
+- **Option A (Recommended — Existing Database):**
+  Place an existing SQLite database containing the populated `statcast` table directly into `data/mlb.db`.
+
+- **Option B (Fresh Download & Sync from Statcast):**
+  1. Download pitch records via `pybaseball` and cache locally to `data/feather/`:
+     ```bash
+     python3 -c "from src.data_handler import StatcastDataHandler; StatcastDataHandler().update_local_sc(just_current=False, specific_year=2025)"
+     ```
+  2. Populate the SQLite `statcast` table and generate indexes:
+     ```bash
+     python3 -c "from src.db_manager import sync_feather_to_sql; sync_feather_to_sql([2025])"
+     ```
+     *(Note: `sync_feather_to_sql` initializes/replaces the `statcast` table on its initial write. Skip this step if you have existing manual edits or multiple historical seasons already stored in `data/mlb.db`.)*
+
 ### Step 1: Precompute Trajectory Tensors
 ```bash
 python3 scripts/build_training_data.py --years 2025
+# (positional syntax also supported: python3 scripts/build_training_data.py 2025)
 ```
 Converts Statcast pitch tracks into left-padded $(100, 9)$ tensors saved to `data/training/trajectories_2025.pt`.
 

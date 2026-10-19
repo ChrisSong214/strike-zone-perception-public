@@ -92,10 +92,19 @@ class FastEyeScorer:
                 plate_x, plate_z, sz_top, sz_bot,
                 phys_sigma_x, phys_sigma_z, is_swing
         """
-        # Drop rows with missing data
+        # Drop rows with missing or non-finite data
         required = ['plate_x', 'plate_z', 'sz_top', 'sz_bot', 
                      'phys_sigma_x', 'phys_sigma_z', 'is_swing']
-        self.pitches = df_pitches.dropna(subset=required).copy()
+        if not all(c in df_pitches.columns for c in required):
+            missing = [c for c in required if c not in df_pitches.columns]
+            raise KeyError(f"Missing required columns for FastEyeScorer: {missing}")
+            
+        valid_mask = df_pitches[required].notna().all(axis=1)
+        numeric_cols = ['plate_x', 'plate_z', 'sz_top', 'sz_bot', 'phys_sigma_x', 'phys_sigma_z']
+        for col in numeric_cols:
+            num = pd.to_numeric(df_pitches[col], errors='coerce')
+            valid_mask &= np.isfinite(num)
+        self.pitches = df_pitches[valid_mask].copy()
         self.is_swing = self.pitches['is_swing'].values.astype(bool)
         
     def loss_function(self, visual_sigma_ft):
@@ -104,6 +113,9 @@ class FastEyeScorer:
         
         Vectorized for speed.
         """
+        if len(self.pitches) == 0:
+            return 0.0
+            
         p_strike = batch_perceptual_strike_prob(self.pitches, visual_sigma_ft)
         
         # Clip for numerical stability
@@ -119,10 +131,16 @@ class FastEyeScorer:
         
         return log_loss
 
-    def fit_sigma(self, bounds=(0.01, 2.0)):
+    def fit_sigma(self, bounds=(0.01, 2.0), min_obs=10):
         """
         Finds the optimal Visual Sigma (in feet) that explains swing decisions.
+        Raises ValueError if fewer than min_obs usable observations are present.
         """
+        if len(self.pitches) < min_obs:
+            raise ValueError(
+                f"Cannot fit visual sigma with fewer than {min_obs} usable observations "
+                f"(got {len(self.pitches)})"
+            )
         result = minimize_scalar(
             self.loss_function, 
             bounds=bounds, 

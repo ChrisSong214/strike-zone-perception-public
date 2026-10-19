@@ -37,7 +37,7 @@ def load_pitches(year):
     """Load pitches with all columns needed for trajectory + labels."""
     conn = get_db_connection()
     
-    query = f"""
+    query = """
     SELECT 
         game_pk, at_bat_number, pitch_number,
         batter, player_name,
@@ -47,17 +47,32 @@ def load_pitches(year):
         description, pitch_type, p_throws, stand,
         release_speed, game_year
     FROM statcast
-    WHERE game_year = {year}
+    WHERE game_year = ?
       AND vx0 IS NOT NULL
+      AND vy0 IS NOT NULL
+      AND vz0 IS NOT NULL
+      AND ax IS NOT NULL
+      AND ay IS NOT NULL
+      AND az IS NOT NULL
       AND release_pos_x IS NOT NULL
+      AND release_pos_z IS NOT NULL
       AND plate_x IS NOT NULL
+      AND plate_z IS NOT NULL
+      AND sz_top IS NOT NULL
+      AND sz_bot IS NOT NULL
     """
     
-    df = pd.read_sql_query(query, conn)
+    df = pd.read_sql_query(query, conn, params=(int(year),))
     conn.close()
     
+    req_cols = ['vx0', 'vy0', 'vz0', 'ax', 'ay', 'az', 'release_pos_x', 'release_pos_z', 'plate_x', 'plate_z', 'sz_top', 'sz_bot']
+    valid_mask = df[req_cols].notna().all(axis=1)
+    for c in req_cols:
+        valid_mask &= np.isfinite(pd.to_numeric(df[c], errors='coerce'))
+    df = df[valid_mask].copy()
+    
     df['is_swing'] = df['description'].isin(SWING_EVENTS)
-    print(f"Loaded {len(df):,} pitches for {year}")
+    print(f"Loaded {len(df):,} valid pitches for {year}")
     return df
 
 
@@ -102,6 +117,11 @@ def run_leaderboard(years, min_pitches=200, device='cpu', decision_frac=0.40):
                 result = scorer.score_batter(batter_df)
                 
                 if result is None:
+                    continue
+                
+                if result['n_pitches'] < min_pitches:
+                    failed = result.get('n_failed', len(batter_df) - result['n_pitches'])
+                    print(f"  [Notice] Batter {batter_id} excluded: only {result['n_pitches']} usable pitches (< {min_pitches} required, {failed} failed trajectory/inference)")
                     continue
                 
                 all_results.append({

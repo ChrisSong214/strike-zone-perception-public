@@ -30,7 +30,7 @@ def load_joined_data(year=2025):
     """
     conn = get_db_connection()
     
-    query = f"""
+    query = """
     SELECT 
         s.game_pk,
         s.at_bat_number,
@@ -51,11 +51,17 @@ def load_joined_data(year=2025):
         ON s.game_pk = p.game_pk
         AND s.at_bat_number = p.at_bat_number
         AND s.pitch_number = p.pitch_number
-    WHERE s.game_year = {year}
+    WHERE s.game_year = ?
+      AND p.phys_sigma_x IS NOT NULL
+      AND p.phys_sigma_z IS NOT NULL
+      AND s.plate_x IS NOT NULL
+      AND s.plate_z IS NOT NULL
+      AND s.sz_top IS NOT NULL
+      AND s.sz_bot IS NOT NULL
     """
     
     print(f"Loading joined data for {year}...")
-    df = pd.read_sql_query(query, conn)
+    df = pd.read_sql_query(query, conn, params=(int(year),))
     conn.close()
     
     # Create is_swing
@@ -89,13 +95,18 @@ def run_leaderboard(years=None, min_pitches=200):
             print(f"No data for {year}, skipping.")
             continue
         
-        # Filter for valid rows required by FastEyeScorer before qualification
+        # Filter for valid finite rows required by FastEyeScorer before qualification
         required_cols = ['plate_x', 'plate_z', 'sz_top', 'sz_bot', 'phys_sigma_x', 'phys_sigma_z', 'is_swing']
         valid_subset = [c for c in required_cols if c in df.columns]
         if valid_subset:
-            df = df.dropna(subset=valid_subset).copy()
+            valid_mask = df[valid_subset].notna().all(axis=1)
+            numeric_cols = [c for c in ['plate_x', 'plate_z', 'sz_top', 'sz_bot', 'phys_sigma_x', 'phys_sigma_z'] if c in df.columns]
+            for col in numeric_cols:
+                num = pd.to_numeric(df[col], errors='coerce')
+                valid_mask &= np.isfinite(num)
+            df = df[valid_mask].copy()
         
-        # Find qualified batters
+        # Find qualified batters on usable observations
         pitch_counts = df.groupby('batter').size()
         qualified = pitch_counts[pitch_counts >= min_pitches].index.tolist()
         print(f"Qualified batters (>= {min_pitches} valid pitches): {len(qualified)}")
@@ -115,15 +126,15 @@ def run_leaderboard(years=None, min_pitches=200):
             
             try:
                 scorer = FastEyeScorer(batter_df)
-                est_sigma, min_loss = scorer.fit_sigma(bounds=(0.01, 2.0))
+                est_sigma, min_loss = scorer.fit_sigma(bounds=(0.01, 2.0), min_obs=min_pitches)
                 
                 all_results.append({
                     'batter_id': int(batter_id),
                     'season': year,
-                    'n_pitches': len(batter_df),
+                    'n_pitches': len(scorer.pitches),
                     'eye_sigma_ft': est_sigma,
                     'loss': min_loss,
-                    'swing_rate': batter_df['is_swing'].mean()
+                    'swing_rate': scorer.pitches['is_swing'].mean()
                 })
             except Exception as e:
                 print(f"  Error on batter {batter_id}: {e}")

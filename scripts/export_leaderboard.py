@@ -5,7 +5,7 @@ import json
 import urllib.request
 import pandas as pd
 import numpy as np
-script_dir = os.path.dirname(os.path.abspath(__file__))
+script_dir = os.path.dirname(os.path.realpath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, '..')) if os.path.basename(script_dir) == 'scripts' else script_dir
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -30,7 +30,7 @@ def main():
 
     default_dir = os.path.join(project_root, 'data', 'leaderboards')
     os.makedirs(default_dir, exist_ok=True)
-    output_path = args.output or f"{args.year}_dva_leaderboard.csv"
+    output_path = args.output or os.path.join(default_dir, f"{args.year}_dva_leaderboard.csv")
     print(f"Exporting leaderboard to {output_path}...")
 
     conn = get_db_connection()

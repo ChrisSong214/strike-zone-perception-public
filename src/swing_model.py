@@ -591,23 +591,70 @@ def load_baseline_predictions_for_df(df, year=2025, data_dir=None, model_dir=Non
                 print(f"[Notice] {oof_path} does not reflect multi-fold validation. Falling back to saved booster.")
                 pred_df = None
             else:
+                # Season provenance verification
+                if 'season' in pred_df.columns:
+                    if pred_df['season'].isna().any() or (pred_df['season'] != int(year)).any():
+                        bad_seasons = pred_df['season'].dropna().unique().tolist()
+                        if require_oof:
+                            raise ValueError(
+                                f"Prediction file {oof_path} fails season provenance: requested year {year}, "
+                                f"but found season values {bad_seasons}!"
+                            )
+                        print(f"[Notice] {oof_path} season mismatch. Falling back to saved booster.")
+                        pred_df = None
+
                 # Batter grouping verification: all pitches for a batter must be in the exact same outer fold
-                batter_col = 'batter' if 'batter' in pred_df.columns else ('batter_id' if 'batter_id' in pred_df.columns else None)
-                if batter_col is None:
+                if pred_df is not None:
                     b_col_df = 'batter' if 'batter' in df.columns else ('batter_id' if 'batter_id' in df.columns else None)
-                    if b_col_df is not None:
+                    b_col_pred = 'batter' if 'batter' in pred_df.columns else ('batter_id' if 'batter_id' in pred_df.columns else None)
+                    
+                    if b_col_df is not None and b_col_pred is not None:
+                        # Both input data and artifact specify batter identity: verify reconciliation
+                        chk = df[keys + [b_col_df]].merge(
+                            pred_df[keys + [b_col_pred, 'oof_fold']], 
+                            on=keys, 
+                            how='inner',
+                            suffixes=('_df', '_pred')
+                        )
+                        col_df = f"{b_col_df}_df" if b_col_df == b_col_pred else b_col_df
+                        col_pred = f"{b_col_pred}_pred" if b_col_df == b_col_pred else b_col_pred
+                        
+                        if not (chk[col_df] == chk[col_pred]).all():
+                            if require_oof:
+                                raise ValueError(
+                                    f"Prediction file {oof_path} fails provenance: batter IDs in artifact do not match input data!"
+                                )
+                            print(f"[Notice] {oof_path} batter IDs do not match input data. Falling back to saved booster.")
+                            pred_df = None
+                        elif chk.groupby(col_df)['oof_fold'].nunique().max() > 1:
+                            if require_oof:
+                                raise ValueError(
+                                    f"Prediction file {oof_path} fails OOF provenance: batter grouping violated "
+                                    f"(pitches for the same batter split across folds)!"
+                                )
+                            print(f"[Notice] {oof_path} violates batter grouping contract. Falling back to saved booster.")
+                            pred_df = None
+                    elif b_col_df is not None:
+                        # Only input data specifies batter identity: verify against input grouping
                         chk = df[keys + [b_col_df]].merge(pred_df[keys + ['oof_fold']], on=keys, how='inner')
                         if chk.groupby(b_col_df)['oof_fold'].nunique().max() > 1:
                             if require_oof:
-                                raise ValueError(f"Prediction file {oof_path} fails OOF provenance: batter grouping violated (pitches for the same batter split across folds)!")
+                                raise ValueError(
+                                    f"Prediction file {oof_path} fails OOF provenance: batter grouping violated "
+                                    f"(pitches for the same batter split across folds)!"
+                                )
                             print(f"[Notice] {oof_path} violates batter grouping contract. Falling back to saved booster.")
                             pred_df = None
-                else:
-                    if pred_df.groupby(batter_col)['oof_fold'].nunique().max() > 1:
-                        if require_oof:
-                            raise ValueError(f"Prediction file {oof_path} fails OOF provenance: batter grouping violated (pitches for the same batter split across folds)!")
-                        print(f"[Notice] {oof_path} violates batter grouping contract. Falling back to saved booster.")
-                        pred_df = None
+                    elif b_col_pred is not None:
+                        # Only artifact specifies batter identity
+                        if pred_df.groupby(b_col_pred)['oof_fold'].nunique().max() > 1:
+                            if require_oof:
+                                raise ValueError(
+                                    f"Prediction file {oof_path} fails OOF provenance: batter grouping violated "
+                                    f"(pitches for the same batter split across folds)!"
+                                )
+                            print(f"[Notice] {oof_path} violates batter grouping contract. Falling back to saved booster.")
+                            pred_df = None
                 
         # 3. Check coverage
         if pred_df is not None:
