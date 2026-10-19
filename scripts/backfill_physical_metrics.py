@@ -44,7 +44,7 @@ def calculate_plate_metrics(cloud_trajs, sz_top, sz_bot, sz_width=17/12):
     Calculates the 'Universal Constants' for the pitch based on its cloud.
     """
     if not cloud_trajs or len(cloud_trajs) == 0:
-        return np.nan, np.nan, np.nan
+        return np.nan, np.nan, np.nan, np.nan
         
     final_x = []
     final_z = []
@@ -60,7 +60,7 @@ def calculate_plate_metrics(cloud_trajs, sz_top, sz_bot, sz_width=17/12):
         fx = traj['x'].iloc[-1]
         fz = traj['z'].iloc[-1]
         if not np.isfinite(fx) or not np.isfinite(fz):
-            return np.nan, np.nan, np.nan
+            return np.nan, np.nan, np.nan, np.nan
         final_x.append(fx)
         final_z.append(fz)
         
@@ -127,6 +127,7 @@ def backfill_constants(years=None, batch_size=1000, resume=True, seed=42):
             WHERE phys_prob_strike IS NOT NULL 
               AND phys_sigma_x IS NOT NULL 
               AND phys_sigma_z IS NOT NULL
+              AND phys_rho IS NOT NULL
         """).fetchall())
         print(f"Found {len(existing_keys):,} valid previously computed pitches. Resuming...")
     conn.close()

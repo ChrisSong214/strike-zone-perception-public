@@ -5,16 +5,16 @@ Temporal H1 ECE,0.09075998833763968,Temporal Holdout
 Temporal H2 ECE,0.08994877189544237,Temporal Holdout
 Temporal H1 AUC,0.9745951177826552,Temporal Holdout
 Temporal H2 AUC,0.9747041721111076,Temporal Holdout
-EV-DVA Split-Half Pearson r,0.721264368656208,Downstream Stability
-EV-DVA Split-Half Spearman rho,0.6915623789259492,Downstream Stability
-Alignment DVA Split-Half Pearson r,0.7357615795688225,Downstream Stability
+EV-DVA Split-Half Pearson r,0.7248600482060441,Downstream Stability
+EV-DVA Split-Half Spearman rho,0.6926108436451114,Downstream Stability
+Alignment DVA Split-Half Pearson r,0.7410876782371628,Downstream Stability
 Unseen Pitchers Brier Score,0.08715173931220663,Group Holdout
 Unseen Pitchers ECE,0.09044874975694173,Group Holdout
 Unseen Pitchers AUC,0.9746266746098613,Group Holdout
 Unseen Batters Brier Score,0.08706449431588614,Group Holdout
 Unseen Batters ECE,0.09036246902474501,Group Holdout
 Unseen Batters AUC,0.9746717358671907,Group Holdout
-Linear Tangent R2 X (tau=0.40),0.9377382389278294,Kinematics
-Linear Tangent R2 Z (tau=0.40),0.9461548216817398,Kinematics
-Linear Tangent MAE X (inches),2.164697500227023,Kinematics
-Linear Tangent MAE Z (inches),5.292271811760392,Kinematics
+Linear Tangent R2 X (tau=0.40),0.8154875044580298,Kinematics
+Linear Tangent R2 Z (tau=0.40),0.15668395573887828,Kinematics
+Linear Tangent MAE X (inches),3.6516555136918116,Kinematics
+Linear Tangent MAE Z (inches),9.668688611410973,Kinematics

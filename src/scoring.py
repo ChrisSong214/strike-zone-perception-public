@@ -35,12 +35,18 @@ def perceptual_strike_prob(plate_x, plate_z, phys_sigma_x, phys_sigma_z,
     total_sigma_x = np.sqrt(phys_sigma_x**2 + visual_sigma_ft**2)
     total_sigma_z = np.sqrt(phys_sigma_z**2 + visual_sigma_ft**2)
     
+    if rho is not None:
+        denom = np.maximum(total_sigma_x * total_sigma_z, 1e-12)
+        total_rho = np.clip((rho * phys_sigma_x * phys_sigma_z) / denom, -0.999, 0.999)
+    else:
+        total_rho = None
+    
     from src.lstm_scoring import LSTMEyeScorer
     res = LSTMEyeScorer.compute_p_strike(
         mu_x=plate_x, mu_z=plate_z,
         sigma_x=total_sigma_x, sigma_z=total_sigma_z,
         sz_top=sz_top, sz_bot=sz_bot,
-        rho=rho, sz_width=sz_width
+        rho=total_rho, sz_width=sz_width
     )
     if isinstance(res, np.ndarray) and res.ndim > 0 and len(res) == 1 and np.isscalar(plate_x):
         return float(res[0])
@@ -50,12 +56,19 @@ def perceptual_strike_prob(plate_x, plate_z, phys_sigma_x, phys_sigma_z,
 def batch_perceptual_strike_prob(df, visual_sigma_ft):
     """
     Vectorized version of perceptual_strike_prob for a DataFrame of pitches.
-    Returns array of P(Strike) for each pitch, honoring cross-axis correlation if present.
+    Returns array of P(Strike) for each pitch, honoring attenuated cross-axis correlation.
     """
-    total_sigma_x = np.sqrt(df['phys_sigma_x'].values**2 + visual_sigma_ft**2)
-    total_sigma_z = np.sqrt(df['phys_sigma_z'].values**2 + visual_sigma_ft**2)
+    phys_sx = df['phys_sigma_x'].values
+    phys_sz = df['phys_sigma_z'].values
+    total_sigma_x = np.sqrt(phys_sx**2 + visual_sigma_ft**2)
+    total_sigma_z = np.sqrt(phys_sz**2 + visual_sigma_ft**2)
     
-    rho = df['phys_rho'].values if 'phys_rho' in df.columns else None
+    if 'phys_rho' in df.columns:
+        rho_phys = df['phys_rho'].fillna(0.0).values
+        denom = np.maximum(total_sigma_x * total_sigma_z, 1e-12)
+        total_rho = np.clip((rho_phys * phys_sx * phys_sz) / denom, -0.999, 0.999)
+    else:
+        total_rho = None
     
     from src.lstm_scoring import LSTMEyeScorer
     sz_width = 17 / 12
@@ -63,7 +76,7 @@ def batch_perceptual_strike_prob(df, visual_sigma_ft):
         mu_x=df['plate_x'].values, mu_z=df['plate_z'].values,
         sigma_x=total_sigma_x, sigma_z=total_sigma_z,
         sz_top=df['sz_top'].values, sz_bot=df['sz_bot'].values,
-        rho=rho, sz_width=sz_width
+        rho=total_rho, sz_width=sz_width
     )
 
 

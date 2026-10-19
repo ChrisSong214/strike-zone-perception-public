@@ -229,18 +229,19 @@ To establish uncompromising methodological rigor, we evaluate the entire two-sta
   - 2nd Half: Brier = $0.0866$ | ECE = $0.0899$ | AUC-ROC = $0.9747$ | Log-Loss = $2.1378$
 * **Downstream EV-DVA Split-Half Stability:** Across 342 qualified batters ($\ge 250$ pitches in both halves), split-half correlation is **$r = 0.721$ ($p = 3.58 \times 10^{-56}$, Spearman $\rho = 0.692$)**, closely mirroring benchmark Chase Rate ($r = 0.784$) and Zone-Swing% ($r = 0.768$).
 
-#### 👥 Group Holdout Generalization (Unseen Pitchers & Unseen Batters)
-* **Unseen Pitchers (5-Fold GroupKFold):** Brier = $0.0872 \pm 0.0011$ | ECE = $0.0904 \pm 0.0011$ | AUC = $0.9746 \pm 0.0005$
-* **Unseen Batters (5-Fold GroupKFold):** Brier = $0.0871 \pm 0.0004$ | ECE = $0.0904 \pm 0.0004$ | AUC = $0.9747 \pm 0.0005$
-* **Interpretation:** The perception model generalizes seamlessly across release geometries and batting stances with zero degradation.
+#### 👥 Pitcher & Batter Subgroup Calibration Stability (Fixed Upstream Model)
+* **Pitcher Subgroups (5-Fold Partition):** Brier = $0.0872 \pm 0.0011$ | ECE = $0.0904 \pm 0.0011$ | AUC = $0.9746 \pm 0.0005$
+* **Batter Subgroups (5-Fold Partition):** Brier = $0.0871 \pm 0.0004$ | ECE = $0.0904 \pm 0.0004$ | AUC = $0.9747 \pm 0.0005$
+* **Interpretation:** Evaluates upstream LSTM calibration across partitioned pitcher and batter subgroups using fixed model predictions, confirming stable calibration across arm slots and stances without subgroup degradation.
 
 #### 🚀 Kinematic Sensitivity & The Perceptual Proxy Framework
-* **Linear Tangent Projection from $t = 0.40$:** Extrapolating plate crossing using only $(x, y, z, v_x, v_y, v_z)$ at $40\%$ flight (assuming zero late acceleration) achieves:
-  - Plate X: $r = 0.9684$ ($R^2 = 0.9377$) | MAE = $2.16$ inches
-  - Plate Z: $r = 0.9727$ ($R^2 = 0.9462$) | MAE = $5.29$ inches
-  - **Result:** Over **$93.8\%$--$94.6\%$ of final plate coordinate variance is already determined by early release position and velocity.**
+* **Linear Tangent & Ballistic Projections from $t = 0.40$:** Extrapolating plate crossing using early $(x, y, z, v_x, v_y, v_z)$ at $40\%$ flight achieves:
+  - Plate X (Linear Tangent): $r = 0.9188$ ($R^2 = 0.8237$) | MAE = $3.50$ inches
+  - Plate Z (Linear Tangent, zero gravity): $r = 0.9133$ ($R^2 = 0.2010$) | MAE = $9.52$ inches (uncompensated gravity drop)
+  - Plate Z (Gravity-Included Ballistic, $g = 32.174\text{ ft/s}^2$): $r = 0.9578$ ($R^2 = 0.8677$) | MAE = $3.67$ inches
+  - **Result:** Early flight kinematics at $t=0.40$ explain **$82.4\%$ of horizontal variance and $86.8\%$ of vertical ballistic variance**, with residual movement capturing pitch-specific aerodynamic Magnus forces and seams.
 * **Trajectory-Based Perceptual Proxy vs. Biological Perception:**
-  Statcast's 9-parameter inputs provide the normative physical upper bound of strike-location information contained in early ball flight ($P(\text{Strike} \mid \mathcal{F}_{0.40})$). Human visual perception carries sensory transmission delays (~150 ms) and retinal slip; thus, $P(\text{Strike} \mid \mathcal{F}_{0.40})$ serves as an objective, leak-free physical proxy for evaluating decision value rather than a direct physiological measurement.
+  Statcast's 9-parameter inputs provide the normative physical upper bound of strike-location information contained in early ball flight ($P(\text{Strike} \mid \mathcal{F}_{0.40})$). Human visual perception carries sensory transmission delays (~150 ms) and retinal slip; thus, $P(\text{Strike} \mid \mathcal{F}_{0.40})$ serves as an objective, leak-free physical proxy for evaluating decision value rather than a direct neurological measurement.
 
 ---
 

@@ -194,6 +194,11 @@ def main():
     oof_df.to_parquet(pred_path, index=False)
     print(f"  Saved {'out-of-fold' if args.oof_splits > 1 else 'in-sample'} baseline predictions: {pred_path}")
     
+    # Also save to data/processed for consumer compatibility
+    processed_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'processed')
+    os.makedirs(processed_dir, exist_ok=True)
+    oof_df.to_parquet(os.path.join(processed_dir, pred_file), index=False)
+    
     conn = get_db_connection()
     try:
         cursor = conn.cursor()

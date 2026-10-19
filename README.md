@@ -151,8 +151,8 @@ python3 scripts/run_commit_horizon.py --year 2025
 ### 4. Full-Pipeline Holdout & Acceleration Sensitivity Audit
 To verify pipeline integrity and address information leakage:
 - **Temporal Holdout Stability:** Evaluating on First-Half (pre-July 1) vs. Second-Half (post-July 1) 2025 proves the upstream LSTM maintains identical calibration (Brier $0.0875$ vs. $0.0866$, ECE $0.0908$ vs. $0.0899$, AUC $0.9746$ vs. $0.9747$) and downstream EV-DVA achieves robust split-half stability ($r = 0.721, p = 3.58 \times 10^{-56}$).
-- **Unseen Group Holdout:** 5-fold cross-validation across unseen pitcher groups (AUC $0.9746 \pm 0.0005$) and unseen batter groups (AUC $0.9747 \pm 0.0005$) confirms zero overfitting to specific arm slots or batters.
-- **Kinematic Sensitivity:** Linear tangent projections from $t = 0.40$ explain $>93.8\%$ of final plate coordinate variance ($R^2_x = 0.9377, R^2_z = 0.9462$, MAE $2.16$ in), demonstrating that early release and velocity dominate pitch destination while framing $P(\text{Strike} \mid \mathcal{F}_{0.40})$ as the normative Bayesian upper bound.
+- **Subgroup Calibration Stability:** 5-fold cross-validation across partitioned pitcher groups (AUC $0.9746 \pm 0.0005$) and batter groups (AUC $0.9747 \pm 0.0005$) confirms consistent calibration stability across arm slots and batters without subgroup degradation.
+- **Kinematic Sensitivity:** Linear tangent projections from $t = 0.40$ explain $82.4\%$ of horizontal plate variance ($R^2_x = 0.8237$, $r = 0.9188$, MAE $3.50$ in), while a gravity-included ballistic baseline ($a_z = -32.174\text{ ft/s}^2$) explains $86.8\%$ of vertical variance ($R^2_z = 0.8677$, $r = 0.9578$, MAE $3.67$ in), demonstrating that early kinematics constrain destination while framing $P(\text{Strike} \mid \mathcal{F}_{0.40})$ as the normative physical upper bound.
 
 ```bash
 python3 analysis/full_pipeline_holdout_audit.py --year 2025

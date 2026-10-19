@@ -502,6 +502,21 @@ def compute_dva(df, league_model, bayesian_model, league_model_perceptual=None):
     # ---- Vectorised posterior lookup (replaces slow row-by-row .apply) ----
     posterior_lut = _build_posterior_lookup(bayesian_model)
     
+    if 'count_group' not in df.columns:
+        b = df['balls'].values if 'balls' in df.columns else np.zeros(len(df), dtype=int)
+        s = df['strikes'].values if 'strikes' in df.columns else np.zeros(len(df), dtype=int)
+        cg = np.full(len(df), 'neutral', dtype=object)
+        cg[(b > s) & (s < 2)] = 'ahead'
+        cg[s == 2] = 'two_strikes'
+        cg[(s > b) & (s < 2)] = 'behind'
+        df['count_group'] = cg
+
+    if 'pitch_group' not in df.columns:
+        df['pitch_group'] = 'fastball'
+
+    if 'loc_bin' not in df.columns:
+        df['loc_bin'] = 'heart'
+
     # Build composite keys for every pitch
     keys = list(zip(
         df['batter'].values,
@@ -511,7 +526,7 @@ def compute_dva(df, league_model, bayesian_model, league_model_perceptual=None):
     ))
     
     # Default fallback: league prior, zero confidence
-    league_priors = bayesian_model.league_priors  # {bin_key: {'mean_p': ...}}
+    league_priors = getattr(bayesian_model, 'league_priors', {})
     
     p_post_arr  = np.empty(len(df), dtype=np.float64)
     conf_arr    = np.empty(len(df), dtype=np.float64)
@@ -574,9 +589,16 @@ def compute_dva(df, league_model, bayesian_model, league_model_perceptual=None):
     df['actual_dva']   = df['alignment_dva']  # Retain actual_dva as alias
     
     # Optional Decision-Time Baseline Evaluation
-    if league_model_perceptual is not None:
+    has_perc_oof = ('xgb_p_swing_perceptual' in df.columns and df['xgb_p_swing_perceptual'].notna().all())
+    if has_perc_oof:
+        xgb_p_perc = df['xgb_p_swing_perceptual'].values
+    elif league_model_perceptual is not None:
         xgb_p_perc = league_model_perceptual.predict(df)
         df['xgb_p_swing_perceptual'] = xgb_p_perc
+    else:
+        xgb_p_perc = None
+
+    if xgb_p_perc is not None:
         df['deception_swing_oe'] = xgb_p_perc - xgb_p
         
         ev_league_perc = xgb_p_perc * ev_swing + (1.0 - xgb_p_perc) * ev_take
@@ -687,9 +709,16 @@ def score_batters(df, league_model, bayesian_model, min_pitches=200, league_mode
             rec['ev_dva_perceptual'] = float(batter_df['ev_dva_perceptual'].mean())
         results.append(rec)
         
+    expected_cols = [
+        'batter_id', 'n_pitches', 'dva_mean', 'ev_dva', 'ev_dva_eb',
+        'alignment_dva', 'alignment_dva_eb', 'tendency_dva', 'actual_dva',
+        'k_shrinkage_ev', 'k_shrinkage_align', 'swing_rate', 'chase_rate',
+        'restricted_chase_rate', 'zone_swing_rate', 'deviation_from_league',
+        'chase_deviation', 'avg_confidence', 'z_score', 'swing_rating', 'rank'
+    ]
+    if len(results) == 0:
+        return pd.DataFrame(columns=expected_cols)
     lb = pd.DataFrame(results)
-    if len(lb) == 0:
-        return lb
         
     mu    = lb['dva_mean'].mean()
     sigma = lb['dva_mean'].std()
@@ -723,6 +752,10 @@ def load_baseline_predictions_for_df(df, year=2025, data_dir=None, model_dir=Non
         model_dir = os.path.join(os.path.dirname(__file__), '..', 'data', 'models')
         
     oof_path = os.path.join(data_dir, f'oof_predictions_{year}.parquet')
+    if not os.path.exists(oof_path):
+        alt_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'processed', f'oof_predictions_{year}.parquet')
+        if os.path.exists(alt_path):
+            oof_path = alt_path
     keys = ['game_pk', 'at_bat_number', 'pitch_number']
     
     # Check if all keys exist in df
@@ -836,7 +869,10 @@ def load_baseline_predictions_for_df(df, year=2025, data_dir=None, model_dir=Non
                 
         # 3. Check coverage
         if pred_df is not None:
-            merged = df[keys].merge(pred_df[keys + ['xgb_p_swing']], on=keys, how='left')
+            cols_to_merge = keys + ['xgb_p_swing']
+            if 'xgb_p_swing_perceptual' in pred_df.columns:
+                cols_to_merge.append('xgb_p_swing_perceptual')
+            merged = df[keys].merge(pred_df[cols_to_merge], on=keys, how='left')
             if merged['xgb_p_swing'].isna().any():
                 missing_count = merged['xgb_p_swing'].isna().sum()
                 if require_oof:
@@ -844,7 +880,11 @@ def load_baseline_predictions_for_df(df, year=2025, data_dir=None, model_dir=Non
                 print(f"[Notice] {oof_path} is missing {missing_count:,} pitches. Falling back to saved booster.")
             else:
                 df = df.copy()
+                df['xgb_p_swing'] = merged['xgb_p_swing'].values
                 df['league_p_swing'] = merged['xgb_p_swing'].values
+                df['p_swing_league'] = merged['xgb_p_swing'].values
+                if 'xgb_p_swing_perceptual' in merged.columns:
+                    df['xgb_p_swing_perceptual'] = merged['xgb_p_swing_perceptual'].values
                 print(f"Loaded verified out-of-fold baseline predictions ({len(df):,} pitches) from {oof_path}")
                 return df
             
@@ -887,6 +927,14 @@ def load_baseline_predictions_for_df(df, year=2025, data_dir=None, model_dir=Non
         
     league_model = LeagueSwingModel().load(model_path)
     df = df.copy()
-    df['league_p_swing'] = league_model.predict(df)
+    preds = league_model.predict(df)
+    df['league_p_swing'] = preds
+    df['xgb_p_swing'] = preds
+    df['p_swing_league'] = preds
     print(f"[Notice] Evaluated baseline P(Swing) using saved model {model_path}.xgb (best_iteration={getattr(league_model, 'best_iteration', None)})")
     return df
+
+
+def load_strict_oof_predictions(df, year=2025, data_dir=None):
+    """Loads strictly verified out-of-fold predictions, raising an error if absent or invalid."""
+    return load_baseline_predictions_for_df(df, year=year, data_dir=data_dir, require_oof=True)

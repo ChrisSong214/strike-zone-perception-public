@@ -45,7 +45,8 @@ def load_joined_data(year=2025):
         s.game_year,
         p.phys_prob_strike,
         p.phys_sigma_x,
-        p.phys_sigma_z
+        p.phys_sigma_z,
+        p.phys_rho
     FROM statcast s
     INNER JOIN physical_pitch_metrics p
         ON s.game_pk = p.game_pk

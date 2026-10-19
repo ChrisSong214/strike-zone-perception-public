@@ -165,11 +165,17 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.08, k_shri
     if 'p_swing_league' not in df.columns:
         if 'xgb_p_swing' in df.columns:
             df['p_swing_league'] = df['xgb_p_swing']
+        elif 'league_p_swing' in df.columns:
+            df['p_swing_league'] = df['league_p_swing']
         else:
             from src.swing_model import load_baseline_predictions_for_df
             df = load_baseline_predictions_for_df(df, year=year, require_oof=False)
-            if 'xgb_p_swing' in df.columns:
+            if 'p_swing_league' in df.columns:
+                pass
+            elif 'xgb_p_swing' in df.columns:
                 df['p_swing_league'] = df['xgb_p_swing']
+            elif 'league_p_swing' in df.columns:
+                df['p_swing_league'] = df['league_p_swing']
             else:
                 model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', f'swing_model_{year}')
                 if not os.path.exists(model_path + '.xgb'):
