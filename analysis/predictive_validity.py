@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import KFold, cross_val_predict
+from sklearn.metrics import r2_score
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if _PROJECT_ROOT not in sys.path:
@@ -58,31 +60,38 @@ def evaluate_predictive_power(df, target_cols=['woba', 'bb_pct', 'k_pct']):
             
         y = sub[t_s2].values
         
+        # 5-fold cross-validation setup for rigorous out-of-sample forecasting
+        kf = KFold(n_splits=5, shuffle=True, random_state=42)
+        
         # Model 1: Baseline (Prior Outcome + Chase Rate)
         X1 = sub[[t_s1, chase_s1]].values
-        reg1 = LinearRegression().fit(X1, y)
-        r2_base = reg1.score(X1, y)
+        y_pred1 = cross_val_predict(LinearRegression(), X1, y, cv=kf)
+        r2_base = r2_score(y, y_pred1)
         
         # Model 1b: Baseline with Z-O Swing% (Prior Outcome + Z-O)
         has_zo = 'z_minus_o_s1' in sub.columns
         if has_zo:
             X_zo = sub[[t_s1, 'z_minus_o_s1']].values
-            reg_zo = LinearRegression().fit(X_zo, y)
-            r2_zo = reg_zo.score(X_zo, y)
+            y_pred_zo = cross_val_predict(LinearRegression(), X_zo, y, cv=kf)
+            r2_zo = r2_score(y, y_pred_zo)
         else:
             r2_zo = r2_base
         
         # Model 2: Extended (Prior Outcome + Chase Rate + DVA)
         X2 = sub[[t_s1, chase_s1, dva_s1]].values
-        reg2 = LinearRegression().fit(X2, y)
-        r2_full = reg2.score(X2, y)
+        y_pred2 = cross_val_predict(LinearRegression(), X2, y, cv=kf)
+        r2_full = r2_score(y, y_pred2)
         
         delta_r2 = max(0.0, r2_full - r2_base)
         
-        # F-test for incremental variance
+        # Full-sample OLS fits for nested F-test significance testing
+        reg1_full = LinearRegression().fit(X1, y)
+        reg2_full = LinearRegression().fit(X2, y)
+        r2_in1 = reg1_full.score(X1, y)
+        r2_in2 = reg2_full.score(X2, y)
         p1 = X1.shape[1]
         p2 = X2.shape[1]
-        f_stat = ((r2_full - r2_base) / (p2 - p1)) / ((1 - r2_full) / (n - p2 - 1)) if r2_full < 1.0 else 0
+        f_stat = ((r2_in2 - r2_in1) / (p2 - p1)) / ((1 - r2_in2) / (n - p2 - 1)) if r2_in2 < 1.0 else 0
         f_pval = 1.0 - stats.f.cdf(f_stat, p2 - p1, n - p2 - 1)
         
         records.append({

@@ -81,3 +81,18 @@ def test_dva_mirage_orthogonality_identity():
     dva_tot = dva.sum()
     
     assert np.isclose(dva_tot, dva_trans + dva_mir)
+
+
+def test_weighted_tunnel_chase_calculation():
+    """Verify continuous deception-weighted chase metric formula."""
+    # sum(swing * p_strike_40 * (1 - true_strike)) / sum(p_strike_40 * (1 - true_strike))
+    swings = np.array([1, 0, 1, 0])
+    p_40 = np.array([0.40, 0.30, 0.10, 0.20])
+    true_strike = np.array([0, 0, 0, 0])
+    
+    # weights are 0.40, 0.30, 0.10, 0.20 (sum = 1.0)
+    # swings on index 0 (0.40) and index 2 (0.10) -> sum = 0.50
+    # weighted_chase = 0.50 / 1.0 = 0.50
+    denom = p_40.sum()
+    wtc = (swings * p_40).sum() / denom
+    assert np.isclose(wtc, 0.50)

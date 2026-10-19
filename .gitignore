@@ -107,3 +107,11 @@ logs/
 analysis/scratch/*
 !analysis/scratch/.gitkeep
 scratch/
+
+# Internal brainstorming & scratch notes
+argon.md
+docs/presentation/DODGERS_RESEARCH_IDEAS_ONE_WEEK.md
+docs/presentation/RELATED_WORK_FOR_RESEARCH_IDEAS.md
+docs/presentation/RESEARCH_IDEA_PILOT_EVIDENCE.md
+docs/presentation/research_idea_pilot.py
+docs/presentation/research_idea_pilot_results.json

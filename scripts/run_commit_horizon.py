@@ -197,6 +197,27 @@ def fit_psychometric_tau(y, p_strike, lam=1.0):
     return ll, res.x[0], res.x[1]
 
 
+def fit_forward_update(y, p_k, delta_p, lam=1.0):
+    """
+    Fits logistic regression of swing on current belief and forward trajectory update:
+        logit P(Swing) = alpha + beta_base * (p_k - 0.50) + beta_delta * delta_p
+    Returns:
+        beta_delta: marginal forward update sensitivity
+    """
+    p_c = p_k - 0.50
+    X = np.column_stack([np.ones(len(y)), p_c, delta_p])
+
+    def loss_and_grad(b):
+        eta = X @ b
+        p = expit(eta)
+        nll = np.sum(np.logaddexp(0, eta) - y * eta) + 0.5 * lam * np.sum(b**2)
+        grad = X.T @ (p - y) + lam * b
+        return nll, grad
+
+    res = minimize(loss_and_grad, np.zeros(3), jac=True, method='L-BFGS-B')
+    return float(res.x[2])
+
+
 def run_commit_horizon_analysis(year=2025, min_pitches=500):
     print("=" * 80)
     print(f"  INDIVIDUAL BATTER COMMIT HORIZON INFERENCE (τ*_i): SEASON {year}")
@@ -235,8 +256,30 @@ def run_commit_horizon_analysis(year=2025, min_pitches=500):
             betas[tau] = beta
             alphas[tau] = alpha
 
-        # Best horizon maximizes log-likelihood
-        best_tau = max(lls.keys(), key=lambda t: lls[t])
+        # Sequential Information Gain / Marginal Forward Update Test
+        # Filter to breaking/offspeed or borderline pitches where trajectory resolves
+        p_diff = (sub['p_strike_55'] - sub['p_strike_25']).abs()
+        mask = p_diff >= 0.05
+        if mask.sum() < 50:
+            mask = np.ones(len(sub), dtype=bool)
+        sub_m = sub[mask]
+        y_m = sub_m['is_swing'].values
+
+        betas_delta = {}
+        for i in range(len(TAU_GRID) - 1):
+            t_k = TAU_GRID[i]
+            t_next = TAU_GRID[i + 1]
+            p_k = sub_m[f'p_strike_{int(round(t_k*100))}'].values
+            p_next = sub_m[f'p_strike_{int(round(t_next*100))}'].values
+            dp = p_next - p_k
+            beta_dp = fit_forward_update(y_m, p_k, dp)
+            betas_delta[t_k] = max(beta_dp, 0.0)
+
+        # Inferred commit horizon: latest horizon where forward update sensitivity >= 50% of peak
+        max_b = max(betas_delta.values()) if max(betas_delta.values()) > 0 else 1.0
+        valid_taus = [t for t, b in betas_delta.items() if b >= 0.50 * max_b]
+        best_tau = max(valid_taus) if valid_taus else 0.40
+
         best_ll = lls[best_tau]
         ll_40 = lls[0.40]
         delta_ll_vs_static = best_ll - ll_40
@@ -358,7 +401,7 @@ def generate_commit_horizon_figures(res_df, year=2025):
         ax1.text(bar.get_x() + bar.get_width()/2.0, yval + 3, f"{count}\n({pct:.1%})",
                  ha='center', va='bottom', fontsize=9.5, fontweight='bold')
 
-    ax1.set_title("Inferred Individual Batter Commit Horizons (τ*_i)\n(Peak Log-Likelihood Across Pitch Trajectory)",
+    ax1.set_title("Inferred Individual Batter Commit Horizons (τ*_i)\n(Marginal Forward Update Test: β_Δ >= 0.50·max)",
                   fontsize=13, fontweight='bold', pad=12)
     ax1.set_xlabel("Optimal Decision Horizon (Fraction of Pitch Flight τ*)", fontsize=11)
     ax1.set_ylabel("Number of Qualified MLB Hitters", fontsize=11)
@@ -389,13 +432,14 @@ def generate_commit_horizon_figures(res_df, year=2025):
 
         # Regression line
         r_val, p_val = stats.pearsonr(valid_bt['optimal_tau'], valid_bt['mean_bat_speed'])
-        lr = LinearRegression().fit(valid_bt[['optimal_tau']], valid_bt['mean_bat_speed'])
+        lr = LinearRegression().fit(valid_bt[['optimal_tau']].values, valid_bt['mean_bat_speed'])
         tau_line = np.linspace(0.24, 0.56, 100)
+        p_str = f"p = {p_val:.3f}" if p_val >= 0.001 else "p < 0.001"
         ax2.plot(tau_line, lr.predict(tau_line.reshape(-1, 1)), color='red', lw=2.2,
-                 label=f"Trend (r = {r_val:+.3f}, p < 0.001)")
+                 label=f"Trend (r = {r_val:+.3f}, {p_str})")
 
         # Callouts for notable players
-        callout_names = ['Steven Kwan', 'Shohei Ohtani', 'Mookie Betts', 'Giancarlo Stanton', 'Kyle Stowers']
+        callout_names = ['Steven Kwan', 'Shohei Ohtani', 'Mookie Betts', 'Giancarlo Stanton', 'Juan Soto']
         for name in callout_names:
             sub = valid_bt[valid_bt['player_name'].str.contains(name, na=False, case=False)]
             if not sub.empty:

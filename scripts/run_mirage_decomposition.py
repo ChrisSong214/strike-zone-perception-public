@@ -94,7 +94,7 @@ def fetch_player_name_api(player_id):
         return f"ID: {player_id}"
 
 
-def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shrinkage=50):
+def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.08, k_shrinkage=50, min_pitcher_pitches=250, min_deceptive_balls=15):
     print("=" * 80)
     print(f"  PERCEPTUAL MIRAGE DECOMPOSITION: SEASON {year}")
     print(f"  Commit Point: 40% Flight (~175ms) | Mirage Threshold: |ΔP| >= {tau_mirage}")
@@ -208,6 +208,14 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shri
 
         trans_chase = trans_balls['is_swing'].mean() if len(trans_balls) > 0 else 0.0
 
+        # Continuous deception-weighted chase metric across ALL out-of-zone pitches
+        # weighted by p_strike at 40% flight:
+        # sum(swing * p_strike_40 * (1 - true_strike)) / sum(p_strike_40 * (1 - true_strike))
+        p_40_balls = balls['lstm_p_strike']
+        sw_balls = balls['is_swing']
+        denom_wtc = p_40_balls.sum()
+        weighted_tunnel_chase = float((sw_balls * p_40_balls).sum() / denom_wtc) if denom_wtc > 0 else 0.0
+
         batter_records.append({
             'batter_id': int(bid),
             'player_name': b_name,
@@ -223,6 +231,7 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shri
             'dva_transparent': round(dva_trans, 2),
             'dva_mirage': round(dva_mir, 2),
             'transparent_chase_rate': round(trans_chase, 4),
+            'weighted_tunnel_chase': round(weighted_tunnel_chase, 4),
             'tunnel_chase_rate': round(tunnel_chase, 4),
             'tunnel_chase_res': round(shrunk_tunnel_res, 4),
             'frozen_take_rate': round(frozen_take, 4),
@@ -246,12 +255,12 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shri
     # -------------------------------------------------------------
     # 2. PITCHER DECEPTION LEADERBOARD ("Perceptual Stuff")
     # -------------------------------------------------------------
-    print("\nAggregating pitcher-pitch_type deception metrics...")
+    print("\nAggregating pitcher deception metrics...")
     pitcher_records = []
     
-    for (pid, pt), pdf in df.groupby(['pitcher', 'pitch_type']):
+    for pid, pdf in df.groupby('pitcher'):
         n = len(pdf)
-        if n < 100:
+        if n < min_pitcher_pitches:
             continue
 
         p_name = pitcher_names.get(int(pid))
@@ -263,6 +272,9 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shri
         true_strikes = pdf[pdf['true_strike'] == 1]
         deceptive_balls = pdf[pdf['is_tunnel']]
 
+        if len(deceptive_balls) < min_deceptive_balls:
+            continue
+
         mean_tunnel_mirage = np.maximum(true_balls['lstm_p_strike'], 0).mean() if len(true_balls) > 0 else 0.0
         tunnel_chase = true_balls['is_swing'].mean() if len(true_balls) > 0 else 0.0
         
@@ -270,10 +282,12 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shri
         induced_oe = (deceptive_balls['is_swing'] - deceptive_balls['p_swing_league']).mean() if len(deceptive_balls) > 0 else 0.0
         frozen_strike = (1 - true_strikes['is_swing']).mean() if len(true_strikes) > 0 else 0.0
 
+        top_pt = pdf['pitch_type'].mode()[0] if len(pdf) > 0 else 'ALL'
+
         pitcher_records.append({
             'pitcher_id': int(pid),
             'pitcher_name': p_name,
-            'pitch_type': pt,
+            'pitch_type': top_pt,
             'n_pitches': n,
             'n_balls': len(true_balls),
             'n_strikes': len(true_strikes),
@@ -300,7 +314,7 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shri
 
         out_pitcher_csv = os.path.join(_PROJECT_ROOT, 'data', 'leaderboards', f'{year}_mirage_pitcher_leaderboard.csv')
         pitcher_df.to_csv(out_pitcher_csv, index=False)
-        print(f"Saved pitcher deception leaderboard to {out_pitcher_csv} ({len(pitcher_df)} pairs)")
+        print(f"Saved pitcher deception leaderboard to {out_pitcher_csv} ({len(pitcher_df)} pitchers)")
 
     # -------------------------------------------------------------
     # 3. ORTHOGONALITY & STATISTICAL AUDIT
@@ -354,12 +368,12 @@ def run_mirage_decomposition(year=2025, min_pitches=500, tau_mirage=0.25, k_shri
     # 4. QUADRANT VISUALIZATION (Figure for Slides)
     # -------------------------------------------------------------
     print("\nGenerating Mirage Orthogonality Quadrant Plot...")
-    plot_mirage_quadrant(batter_df, year)
+    plot_mirage_quadrant(batter_df, year, tau_mirage=tau_mirage)
 
     return batter_df, pitcher_df
 
 
-def plot_mirage_quadrant(batter_df, year=2025):
+def plot_mirage_quadrant(batter_df, year=2025, tau_mirage=0.08):
     """
     Renders 2D Talent Decomposition:
     X: Transparent Chase Rate (Zone Control)
@@ -459,7 +473,7 @@ def plot_mirage_quadrant(batter_df, year=2025):
     ax.set_title(f"Perceptual Mirage Decomposition: Deception vs. Discipline ({year})\n"
                  r"Decoupling Baseline Zone Judgment from Tunneling Vulnerability ($R^2 < 0.08$ with raw Chase Rate)",
                  fontsize=14, fontweight='bold', pad=15)
-    ax.set_xlabel("Transparent Chase Rate (%) [Swing % on Clear Balls |ΔP| < 0.25]", fontsize=11, fontweight='bold')
+    ax.set_xlabel(f"Transparent Chase Rate (%) [Swing % on Clear Balls |ΔP| < {tau_mirage}]", fontsize=11, fontweight='bold')
     ax.set_ylabel("Tunnel Chase Residual (Swings vs. League Expectation on Deceptive Balls)", fontsize=11, fontweight='bold')
 
     plt.tight_layout()
@@ -479,7 +493,9 @@ def main():
     parser = argparse.ArgumentParser(description="Perceptual Mirage Decomposition")
     parser.add_argument('--years', nargs='*', type=int, default=[2025], help="Seasons to evaluate")
     parser.add_argument('--min-pitches', type=int, default=500, help="Minimum pitches seen per batter")
-    parser.add_argument('--mirage-threshold', type=float, default=0.25, help="Threshold for perceptual mirage |ΔP|")
+    parser.add_argument('--mirage-threshold', '--mirage-thresh', dest='mirage_threshold', type=float, default=0.08, help="Threshold for perceptual mirage |ΔP| (default: 0.08)")
+    parser.add_argument('--min-pitcher-pitches', type=int, default=250, help="Minimum pitches thrown per pitcher (default: 250)")
+    parser.add_argument('--min-deceptive-balls', type=int, default=15, help="Minimum deceptive balls thrown per pitcher (default: 15)")
     parser.add_argument('--k-shrinkage', type=int, default=50, help="Empirical Bayes shrinkage sample size")
     args = parser.parse_args()
 
@@ -488,7 +504,9 @@ def main():
             year=yr,
             min_pitches=args.min_pitches,
             tau_mirage=args.mirage_threshold,
-            k_shrinkage=args.k_shrinkage
+            k_shrinkage=args.k_shrinkage,
+            min_pitcher_pitches=args.min_pitcher_pitches,
+            min_deceptive_balls=args.min_deceptive_balls
         )
 
 

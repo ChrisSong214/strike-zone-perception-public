@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![XGBoost](https://img.shields.io/badge/XGBoost-1.7+-green.svg)](https://xgboost.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-17%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-31%20passed-brightgreen.svg)]()
 
 > **Research and presentation by Chris Song** presented at the **SABR / SAGB Conference**.  
 > Materials and slides available in [`docs/presentation/`](docs/presentation/).
@@ -91,11 +91,64 @@ python3 analysis/compare_stowers_kwan_40.py --year 2025
 
 ---
 
+## 🧠 Advanced Perceptual Extensions
+
+This repository includes three cutting-edge perceptual modeling extensions designed to evaluate late movement, biological uncertainty, and individual decision timing:
+
+### 1. Deception vs. Discipline: The Perceptual Mirage Decomposition ($\Delta P$)
+Compares the streaming LSTM belief at the biological commit point ($t = 0.40$, ~175 ms) against ground-truth plate arrival ($t = 1.0$):
+$$\Delta P_i = P(\text{Strike} \mid \mathcal{F}_{0.40})_i - \mathbb{I}(\text{True Strike})_i$$
+- **Decoupled Dimensions:** Decouples baseline strike zone control ($|\Delta P| < 0.08$) from late pitch tunneling vulnerability ($|\Delta P| \ge 0.08$), achieving $>86.5\%$ orthogonality ($R^2 < 0.14$) against traditional Chase Rate.
+- **Continuous Deception-Weighted Chase:** Evaluates chase rate weighted by early perceptual strike probability across all out-of-zone pitches ($r = 0.284$ with raw chase, $91.9\%$ independent).
+- **Dual-Sided Pitcher Perceptual Stuff+:** Quantifies induced swings above expectation on deceptive balls, isolating arms with genuine late movement (e.g. Yoshinobu Yamamoto's cutter FC leads MLB pitch types at $172.9$ Perceptual Stuff+).
+
+<p align="center">
+  <img src="assets/presentation/mirage_orthogonality_quadrant.png" alt="Perceptual Mirage Orthogonality Quadrant" width="85%"/>
+</p>
+
+```bash
+python3 scripts/run_mirage_decomposition.py --years 2025 --mirage-thresh 0.08
+```
+
+### 2. Sensitivity to Visual Uncertainty: The MDN Covariance Matrix ($\det \mathbf{\Sigma}_{0.40}$)
+Leverages the full bivariate spatial covariance matrix output by the Mixture Density Network:
+$$\mathbf{\Sigma}_{0.40} = \begin{pmatrix} \sigma_x^2 & \rho \sigma_x \sigma_z \\ \rho \sigma_x \sigma_z & \sigma_z^2 \end{pmatrix}, \quad \text{Vol}(\mathbf{\Sigma}_{0.40}) = \pi \sqrt{\det \mathbf{\Sigma}_{0.40}} = \pi \sigma_x \sigma_z \sqrt{1 - \rho^2}$$
+- **Ambiguity Policy Estimation:** Fits a count-controlled psychometric logistic model on competitive borderline pitches ($0.30 \le P(\text{Strike}) \le 0.70$) to extract each batter's uncertainty sensitivity $\beta_{U,i}$.
+- **Strategic Policy Archetypes:** Discovers **Ambiguity-Seeking** hitters ("when in doubt, swing", e.g. Tyler Stephenson $\beta_U = +1.98$) vs. **Ambiguity-Averse** hitters ("when in doubt, take", e.g. Mike Trout $\beta_U = -2.10$, Ronald Acuña Jr. $\beta_U = -2.06$).
+
+<p align="center">
+  <img src="assets/presentation/uncertainty_response_curves.png" alt="Visual Uncertainty Response Curves" width="85%"/>
+</p>
+
+```bash
+python3 scripts/run_uncertainty_sensitivity.py --year 2025
+```
+
+### 3. Inferring Individual Commit Horizons ($\tau^*_i$) & Statcast Bat Tracking
+Replaces the static $\tau = 0.40$ assumption by inferring each batter's individual commitment horizon $\tau^*_i \in [0.25, 0.55]$ along the 100-step trajectory via the **Sequential Information Gain / Marginal Forward Update Test**:
+$$\text{logit } P(\text{Swing}) = \alpha + \beta_{\text{base}} \cdot (P_{\tau_k} - 0.50) + \beta_{\Delta} \cdot (P_{\tau_{k+1}} - P_{\tau_k})$$
+- **Physiological Horizon Distribution:** Identifies the elbow point where late trajectory updates cease to affect swing probability ($\beta_\Delta \ge 0.50 \cdot \max \boldsymbol{\beta}_\Delta$), yielding a balanced interior distribution spanning $100\text{ ms}$ ($\tau^* = 0.25$) to $200\text{ ms}$ ($\tau^* = 0.50$).
+- **Biomechanical Grounding:** Hitters with explosive swing lengths and heavy rotational inertia (Giancarlo Stanton: $\tau^* = 0.30$, $79.0\text{ mph}$ bat speed, $8.72\text{ ft}$ swing length) commit early, while compact hitters with short inside-out strokes (Freddie Freeman: $\tau^* = 0.50$, $68.4\text{ mph}$, $6.81\text{ ft}$) track pitches deep into flight.
+
+<p align="center">
+  <img src="assets/presentation/commit_horizon_bat_tracking.png" alt="Commit Horizon vs Bat Tracking" width="85%"/>
+</p>
+
+```bash
+python3 scripts/run_commit_horizon.py --year 2025
+```
+
+---
+
 ## 📁 Repository Structure
 
 ```text
 sp26_sagb_dj/
 ├── assets/                     # Visual figures, plots, and interactive HTML
+│   ├── presentation/           # High-resolution (300 DPI) conference presentation assets
+│   │   ├── mirage_orthogonality_quadrant.png
+│   │   ├── uncertainty_response_curves.png
+│   │   └── commit_horizon_bat_tracking.png
 │   ├── dva_top10.png
 │   ├── dva_bottom10.png
 │   ├── dva_scatter_plots.png
@@ -103,34 +156,27 @@ sp26_sagb_dj/
 │   ├── stowers_vs_kwan.png
 │   └── perceptual_cloud_3d.html
 ├── data/
-│   ├── leaderboards/           # Tracked CSV exports (e.g. 2025 DVA leaderboard)
+│   ├── leaderboards/           # Tracked CSV exports (DVA, Mirage, Uncertainty, Horizon)
 │   ├── models/                 # Model checkpoints (best_model.pt, swing_model.xgb)
 │   ├── raw_data/               # Statcast feathers (gitignored; see setup)
 │   └── training/               # Trajectories and parquet features (gitignored)
 ├── docs/
 │   ├── audits/                 # Comprehensive code & pipeline audit logs
-│   └── presentation/           # SAGB conference slides and reference papers
+│   └── presentation/           # Empirical findings, presentation slides, & paper notes
 ├── notebooks/                  # Interactive Jupyter exploration notebooks
-│   ├── 01_exploration.ipynb
-│   ├── 02_trajectory_viz.ipynb
-│   ├── 03_uncertainty_viz.ipynb
-│   ├── 04_perception_viz.ipynb
-│   └── 05_eye_rating_leaderboard.ipynb
 ├── scripts/                    # Core pipeline and training CLI scripts
-│   ├── build_training_data.py  # Converts Statcast pitches to (100, 9) tensors
-│   ├── train_model.py          # Trains LSTM+MDN perception model
-│   ├── build_swing_features.py # Evaluates P(Strike) at decision point
-│   ├── train_swing_model.py    # Trains XGBoost out-of-fold baseline
-│   ├── run_eye_rating_lstm.py  # Computes LSTM eye ratings & saves to DB
-│   ├── run_eye_rating.py       # Computes physical eye ratings via MLE
-│   ├── backfill_physical_metrics.py
-│   └── export_leaderboard.py   # Exports swing_ratings from SQLite to CSV
-├── analysis/                   # Case studies, twin comparisons, & figure generators
+│   ├── run_mirage_decomposition.py   # Deception vs. Discipline (Mirage Residual ΔP)
+│   ├── run_uncertainty_sensitivity.py # MDN Covariance Sensitivity (det Σ_0.40)
+│   ├── run_commit_horizon.py         # Individual Commit Times (τ*_i) & Bat Tracking
+│   ├── build_training_data.py        # Converts Statcast pitches to (100, 9) tensors
+│   ├── train_model.py                # Trains LSTM+MDN perception model
+│   ├── build_swing_features.py       # Evaluates P(Strike) at decision point
+│   ├── train_swing_model.py          # Trains XGBoost out-of-fold baseline
+│   ├── run_eye_rating_lstm.py        # Computes LSTM eye ratings & saves to DB
+│   └── export_leaderboard.py         # Exports swing_ratings from SQLite to CSV
+├── analysis/                   # Predictive validity, case studies, & figure generators
+│   ├── predictive_validity.py        # 5-fold cross-validated out-of-sample regressions
 │   ├── compare_stowers_kwan_40.py
-│   ├── compare_bregman_ramirez.py
-│   ├── compare_trout_kwan.py
-│   ├── generate_leaderboard_image.py
-│   ├── generate_cloud.py
 │   └── ...
 ├── src/                        # Core Python library
 │   ├── db_manager.py           # SQLite connection & schema management
@@ -140,14 +186,15 @@ sp26_sagb_dj/
 │   ├── swing_model.py          # League XGBoost baseline & DVA calculation
 │   ├── physics.py              # 9-parameter constant acceleration trajectory
 │   ├── uncertainty.py          # Monte Carlo release parameter perturbation
-│   ├── perception.py           # Continuous distance-dependent Bayesian fusion
-│   ├── scoring.py              # Classical FastEyeScorer MLE
-│   └── visualization.py        # 2D/3D Plotly and Matplotlib renderers
-├── tests/                      # Automated test suite (pytest)
-│   ├── test_lstm_scoring.py    # BVN CDF, symmetry, and boundary conditions
-│   ├── test_perception.py      # Perceptual cloud fusion and particle limits
-│   ├── test_physics_boundaries.py # Trajectory equations and zero-accel limits
-│   └── test_uncertainty.py     # Trajectory cloud perturbations
+│   └── scoring.py              # Classical FastEyeScorer MLE
+├── tests/                      # Automated test suite (31 tests in pytest)
+│   ├── test_mirage_decomposition.py     # Deception residual & weighted chase
+│   ├── test_uncertainty_sensitivity.py  # Ridge ambiguity policy & volume
+│   ├── test_commit_horizon.py           # Sequential forward update elbow test
+│   ├── test_lstm_scoring.py             # BVN CDF & strike zone integration
+│   ├── test_oof_provenance.py           # Strict out-of-fold leak guards
+│   ├── test_physics_boundaries.py       # Trajectory kinematics & physics
+│   └── test_scoring.py                  # DVA scoring & shrinkage
 ├── .gitignore                  # Production gitignore for large ML datasets
 ├── pyproject.toml              # Modern PEP 517/621 package build config
 ├── requirements.txt            # Python dependencies
@@ -162,8 +209,8 @@ sp26_sagb_dj/
 ### 1. Clone & Set Up Environment
 
 ```bash
-git clone https://github.com/chrissong/sp26_sagb_dj.git
-cd sp26_sagb_dj
+git clone https://github.com/ChrisSong214/strike-zone-perception.git
+cd strike-zone-perception
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -180,7 +227,7 @@ pip install -e .
 pytest tests/
 ```
 
-All 17 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, trajectory kinematics, FastEyeScorer filtering and minimum observation guards, and strict out-of-fold provenance validation.
+All 31 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, trajectory kinematics, FastEyeScorer filtering and minimum observation guards, strict out-of-fold provenance validation, perceptual mirage decompositions, visual uncertainty sensitivity, and sequential commit horizon forward updates.
 
 ### 3. Export the 2025 Leaderboard
 
