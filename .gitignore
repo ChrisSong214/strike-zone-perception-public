@@ -1,0 +1,117 @@
+# ==============================================================================
+# Byte-compiled / optimized / DLL files
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ==============================================================================
+# Virtual Environments
+# ==============================================================================
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# ==============================================================================
+# Distribution / packaging
+# ==============================================================================
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ==============================================================================
+# Unit test / coverage / linters
+# ==============================================================================
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# ==============================================================================
+# Jupyter Notebooks
+# ==============================================================================
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# ==============================================================================
+# Operating System & IDE Files
+# ==============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ==============================================================================
+# Large Datasets, Databases & Training Tensors (Exceed GitHub 100MB limit)
+# ==============================================================================
+*.db
+*.sqlite
+*.sqlite3
+*.feather
+*.parquet
+*.csv.gz
+*.tar.gz
+
+# Statcast SQLite database
+data/mlb.db
+notebooks/data/
+
+# Raw and training data
+data/raw_data/*
+data/training/*
+
+# Preserve empty directory structures and tracked leaderboards
+!data/raw_data/.gitkeep
+!data/training/.gitkeep
+!data/models/.gitkeep
+!analysis/scratch/.gitkeep
+!data/leaderboards/*.csv
+
+# ==============================================================================
+# Logs & Scratch
+# ==============================================================================
+*.log
+logs/
+analysis/scratch/*
+!analysis/scratch/.gitkeep
+scratch/
+
+# Internal brainstorming & scratch notes
+edits.md
+docs/presentation/DODGERS_RESEARCH_IDEAS_ONE_WEEK.md
+docs/presentation/RELATED_WORK_FOR_RESEARCH_IDEAS.md
+docs/presentation/RESEARCH_IDEA_PILOT_EVIDENCE.md
+docs/presentation/research_idea_pilot.py
+docs/presentation/research_idea_pilot_results.json

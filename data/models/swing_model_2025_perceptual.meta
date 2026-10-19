@@ -1,0 +1,43 @@
+{
+  "year": 2025,
+  "feature_mode": "decision_time",
+  "feature_names": [
+    "balls",
+    "strikes",
+    "two_strikes",
+    "stand_R",
+    "p_throws_R",
+    "platoon",
+    "release_speed",
+    "outs_when_up",
+    "inning",
+    "runners_on",
+    "score_diff",
+    "lstm_mu_x",
+    "lstm_mu_z",
+    "lstm_sigma_x",
+    "lstm_sigma_z",
+    "lstm_rho",
+    "lstm_p_strike"
+  ],
+  "feature_importances": {
+    "balls": 73.3323974609375,
+    "strikes": 370.78375244140625,
+    "two_strikes": 449.9004211425781,
+    "stand_R": 33.74202346801758,
+    "p_throws_R": 33.92879867553711,
+    "platoon": 28.414409637451172,
+    "release_speed": 38.71577453613281,
+    "outs_when_up": 8.429189682006836,
+    "inning": 9.991538047790527,
+    "runners_on": 23.068885803222656,
+    "score_diff": 9.077828407287598,
+    "lstm_mu_x": 28.03719711303711,
+    "lstm_mu_z": 38.63279724121094,
+    "lstm_sigma_x": 206.2984161376953,
+    "lstm_sigma_z": 37.106746673583984,
+    "lstm_rho": 14.363631248474121,
+    "lstm_p_strike": 868.06982421875
+  },
+  "best_iteration": 299
+}
