@@ -60,3 +60,29 @@ def test_uncertainty_response_monotonicity():
     # Seeking batter: beta_U = +1.0
     p_seeking = expit(offset + alpha + beta_P * 0.0 + (1.0) * u_grid)
     assert p_seeking[0] < p_seeking[1] < p_seeking[2]
+
+
+def test_fit_batter_ridge_5dim():
+    """Test 5-parameter ridge logistic regression with edge_dist and sigma_perp."""
+    np.random.seed(42)
+    n = 400
+    offset = np.random.normal(0, 0.5, size=n)
+    p_c = np.random.uniform(-0.5, 0.5, size=n)
+    edge_dist = np.random.normal(0, 1.0, size=n)
+    u_z = np.random.normal(0, 1.0, size=n)
+    sigma_perp_z = np.random.normal(0, 1.0, size=n)
+
+    X = np.column_stack([np.ones(n), p_c, edge_dist, u_z, sigma_perp_z])
+    true_beta = np.array([-0.1, 1.2, -0.5, -0.4, 0.3])
+    eta = offset + X @ true_beta
+    p = expit(eta)
+    y = (np.random.uniform(0, 1, size=n) < p).astype(int)
+
+    beta_est, se_est = fit_batter_ridge_logistic(offset, X, y, lam=1.0)
+    assert len(beta_est) == 5
+    assert len(se_est) == 5
+    assert np.all(np.isfinite(beta_est))
+    assert np.all(se_est > 0)
+    # Signs should match strong signals
+    assert beta_est[1] > 0  # p_c positive
+    assert beta_est[2] < 0  # edge_dist negative

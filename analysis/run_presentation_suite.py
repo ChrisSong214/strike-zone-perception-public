@@ -22,6 +22,7 @@ ANALYSES = [
     ("Individual Commit Horizon Inference", "scripts/run_commit_horizon.py", False),
     ("Historical Breakouts & Declines", "analysis/breakout_detection.py", False),
     ("Pitcher Deception & Induced Errors", "analysis/pitcher_deception.py", False),
+    ("Full-Pipeline Holdout & Acceleration Sensitivity Audit", "analysis/full_pipeline_holdout_audit.py", False),
 ]
 
 

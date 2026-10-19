@@ -1,5 +1,6 @@
 """
-LSTM + Mixture Density Network (MDN) for Pitch Perception — Streaming Version
+LSTM with Bivariate Gaussian Probabilistic Output Head (Single-Component K=1 MDN)
+for Pitch Perception — Streaming Version
 
 The model processes a pitch trajectory and outputs a 2D Gaussian belief
 about the plate-crossing location AT EVERY TIMESTEP, not just the final one.
@@ -11,7 +12,8 @@ This is the "Living Cloud" — early in the flight the model should have high σ
 Architecture:
     Input:  (batch, seq_len, 9)  — [x, y, z, vx, vy, vz, ax, ay, az] per timestep
     LSTM:   2-layer, hidden=128, dropout=0.2
-    MDN:    Linear(128 → 5) at each timestep → [μx, μz, σx, σz, ρ]
+    Head:   Linear(128 → 5) at each timestep → [μx, μz, σx, σz, ρ]
+            parameterizing a correlated bivariate Gaussian distribution.
 
 Loss: Negative log-likelihood of the actual (plate_x, plate_z) under
       the predicted Gaussian at EACH timestep, averaged over the sequence.
@@ -22,10 +24,14 @@ import torch
 import torch.nn as nn
 import math
 
+# Default decision commitment point across flight (40% flight, ~175ms after release)
+DEFAULT_DECISION_FRAC = 0.40
+
 
 class PitchPerceptionLSTM(nn.Module):
     """
-    Streaming LSTM + MDN — outputs predictions at every timestep.
+    Streaming LSTM with Bivariate Gaussian Probabilistic Output Head
+    (Single-Component K=1 Mixture Density Network) — outputs predictions at every timestep.
     """
     
     def __init__(self, input_size=9, hidden_size=128, num_layers=2, dropout=0.2):
@@ -97,7 +103,7 @@ class PitchPerceptionLSTM(nn.Module):
         all_params = self.forward(x, lengths)  # (batch, seq_len, 5)
         return all_params[:, -1, :]
     
-    def predict_at_fraction(self, x, lengths=None, fraction=0.65):
+    def predict_at_fraction(self, x, lengths=None, fraction=DEFAULT_DECISION_FRAC):
         """
         Returns prediction at a specific fraction through each sequence's
         valid portion.  This is the "decision point" — the moment in the 
@@ -108,7 +114,7 @@ class PitchPerceptionLSTM(nn.Module):
             lengths:  (batch,) valid sequence lengths
             fraction: 0.0 = first valid timestep (release)
                       1.0 = last valid timestep  (plate)
-                      0.40 = 40% through flight (~175ms after release)
+                      DEFAULT_DECISION_FRAC = 0.40 (40% through flight, ~175ms after release)
         
         Returns:
             params: (batch, 5) — [μx, μz, σx, σz, ρ] at the decision point

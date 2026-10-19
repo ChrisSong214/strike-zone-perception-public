@@ -22,7 +22,7 @@ from scipy.stats import norm
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.model import PitchPerceptionLSTM
+from src.model import PitchPerceptionLSTM, DEFAULT_DECISION_FRAC
 from src.physics import calculate_trajectory
 
 # --- Constants ---
@@ -33,7 +33,7 @@ SEQ_LEN = 100
 
 class LSTMEyeScorer:
     """
-    Scores batters using the trained LSTM+MDN streaming perception model.
+    Scores batters using the trained LSTM streaming perception model.
     
     For each pitch:
         1. Generate trajectory sequence from Statcast data
@@ -42,7 +42,7 @@ class LSTMEyeScorer:
         4. Score the batter on how well swings align with P(Strike)
     """
     
-    def __init__(self, model_path=None, device='cpu', decision_frac=0.40):
+    def __init__(self, model_path=None, device='cpu', decision_frac=DEFAULT_DECISION_FRAC):
         """
         Load trained model and normalization stats.
         
@@ -51,7 +51,7 @@ class LSTMEyeScorer:
             device: 'cpu', 'mps', or 'cuda'
             decision_frac: Fraction through the pitch's flight at which to
                 evaluate the model.  0.0 = release, 1.0 = plate.
-                Default 0.65 ≈ 140ms before plate on a 95-mph fastball,
+                Default DEFAULT_DECISION_FRAC = 0.40 (~175ms after release, ~40% through flight),
                 corresponding to the batter's swing/take decision point.
         """
         if model_path is None:
@@ -336,6 +336,40 @@ class LSTMEyeScorer:
         d_z = np.minimum(np.abs(mu_z - sz_bot), np.abs(mu_z - sz_top)) / sigma_z
         
         return np.minimum(d_x, d_z)
+
+    @staticmethod
+    def compute_boundary_orthogonal_uncertainty(mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot,
+                                                sz_width=17/12):
+        """
+        Computes Euclidean distance to nearest strike zone boundary and boundary-perpendicular standard deviation.
+        
+        Returns:
+            edge_dist: Euclidean distance from (mu_x, mu_z) to nearest strike-zone boundary
+            sigma_perp: Directional standard deviation perpendicular to nearest strike-zone boundary
+                       (sigma_x for vertical left/right edges, sigma_z for horizontal top/bottom edges)
+        """
+        mu_x = np.asarray(mu_x, dtype=np.float64)
+        mu_z = np.asarray(mu_z, dtype=np.float64)
+        sigma_x = np.asarray(sigma_x, dtype=np.float64)
+        sigma_z = np.asarray(sigma_z, dtype=np.float64)
+        sz_top = np.asarray(sz_top, dtype=np.float64)
+        sz_bot = np.asarray(sz_bot, dtype=np.float64)
+        
+        sz_w_half = sz_width / 2.0
+        d_x = np.abs(np.abs(mu_x) - sz_w_half)
+        d_z = np.minimum(np.abs(mu_z - sz_bot), np.abs(mu_z - sz_top))
+        
+        sigma_perp = np.where(d_x <= d_z, sigma_x, sigma_z)
+        
+        x_clamped = np.clip(mu_x, -sz_w_half, sz_w_half)
+        z_clamped = np.clip(mu_z, sz_bot, sz_top)
+        inside_mask = (np.abs(mu_x) <= sz_w_half) & (mu_z >= sz_bot) & (mu_z <= sz_top)
+        
+        dist_inside = np.minimum(d_x, d_z)
+        dist_outside = np.hypot(mu_x - x_clamped, mu_z - z_clamped)
+        edge_dist = np.where(inside_mask, dist_inside, dist_outside)
+        
+        return edge_dist, sigma_perp
     
     def score_batter(self, df_batter):
         """

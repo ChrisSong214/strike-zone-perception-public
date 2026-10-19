@@ -62,3 +62,31 @@ def test_sequential_elbow_detection():
     valid_taus = [t for t, b in betas_delta.items() if b >= 0.50 * max_b]
     best_tau = max(valid_taus)
     assert best_tau == 0.40
+
+
+def test_fit_smooth_information_horizon_center_of_mass():
+    """Verify smooth Information Center of Mass estimation and delta-method standard error."""
+    from scripts.run_commit_horizon import fit_smooth_information_horizon, MID_TAUS
+    from scipy.special import expit
+    
+    np.random.seed(42)
+    n = 600
+    p0 = np.random.uniform(-0.5, 0.5, n)
+    deltas = np.random.normal(0, 0.1, size=(n, 6))
+    
+    # Ground truth weights concentrated around early intervals (tau ~ 0.30)
+    true_w = np.array([4.0, 3.0, 1.0, 0.0, 0.0, 0.0])
+    expected_center = np.sum(MID_TAUS * true_w) / true_w.sum()
+    
+    eta = 0.1 + 1.5 * p0 + deltas @ true_w
+    y = (np.random.uniform(0, 1, n) < expit(eta)).astype(int)
+    
+    tau_star, se_tau, w_opt, alpha, beta_0 = fit_smooth_information_horizon(y, p0 + 0.50, deltas)
+    
+    assert np.isfinite(tau_star)
+    assert np.isfinite(se_tau)
+    assert 0.25 <= tau_star <= 0.55
+    assert se_tau > 0.005
+    # Smooth estimate should be close to expected center of mass
+    assert abs(tau_star - expected_center) < 0.06
+

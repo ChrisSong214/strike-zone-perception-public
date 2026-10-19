@@ -129,3 +129,45 @@ def test_compute_mahalanobis_edge_dist():
     assert np.isclose(dist, 17.0 / 24.0 / 0.1)
 
 
+def test_compute_boundary_orthogonal_uncertainty():
+    """Verify Euclidean edge distance and directional sigma_perp calculations."""
+    sz_top = 3.5
+    sz_bot = 1.5
+    half_w = 17.0 / 24.0  # ~0.70833
+
+    # Case 1: Inside zone, closer to horizontal edge (x-boundary)
+    # mu_x = 0.6, mu_z = 2.5 (dist_x ~ 0.1083, dist_z = 1.0)
+    edge_dist, sigma_perp = LSTMEyeScorer.compute_boundary_orthogonal_uncertainty(
+        mu_x=0.6, mu_z=2.5, sigma_x=0.15, sigma_z=0.25, sz_top=sz_top, sz_bot=sz_bot
+    )
+    assert np.isclose(edge_dist, half_w - 0.6)
+    assert np.isclose(sigma_perp, 0.15)  # Closer to left/right edge, so sigma_perp is sigma_x
+
+    # Case 2: Inside zone, closer to vertical edge (top boundary)
+    # mu_x = 0.0, mu_z = 3.4 (dist_x ~ 0.7083, dist_z = 0.1)
+    edge_dist, sigma_perp = LSTMEyeScorer.compute_boundary_orthogonal_uncertainty(
+        mu_x=0.0, mu_z=3.4, sigma_x=0.15, sigma_z=0.25, sz_top=sz_top, sz_bot=sz_bot
+    )
+    assert np.isclose(edge_dist, 3.5 - 3.4)
+    assert np.isclose(sigma_perp, 0.25)  # Closer to top/bottom edge, so sigma_perp is sigma_z
+
+    # Case 3: Outside zone directly to the right
+    # mu_x = 1.0, mu_z = 2.5 -> dx = 1.0 - half_w, dz = 0
+    edge_dist, sigma_perp = LSTMEyeScorer.compute_boundary_orthogonal_uncertainty(
+        mu_x=1.0, mu_z=2.5, sigma_x=0.15, sigma_z=0.25, sz_top=sz_top, sz_bot=sz_bot
+    )
+    assert np.isclose(edge_dist, 1.0 - half_w)
+    assert np.isclose(sigma_perp, 0.15)
+
+    # Case 4: Vectorized
+    xs = np.array([0.6, 0.0])
+    zs = np.array([2.5, 3.4])
+    sxs = np.array([0.15, 0.15])
+    szs = np.array([0.25, 0.25])
+    ed, sp = LSTMEyeScorer.compute_boundary_orthogonal_uncertainty(
+        mu_x=xs, mu_z=zs, sigma_x=sxs, sigma_z=szs, sz_top=sz_top, sz_bot=sz_bot
+    )
+    assert np.allclose(ed, [half_w - 0.6, 0.1])
+    assert np.allclose(sp, [0.15, 0.25])
+
+

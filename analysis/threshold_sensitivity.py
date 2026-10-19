@@ -76,7 +76,8 @@ def plot_sensitivity(df, save_path):
         ax1.plot(x, df['ZO_YoY_r'], marker='^', linewidth=2.4, markersize=7, color='#b07d62', linestyle='-.', label='Z-O Swing % [Zone - Chase] ($r$)')
     ax1.plot(x, df['wOBA_YoY_r'], marker='d', linewidth=2.0, markersize=6, color='#6c757d', linestyle=':', label='Offensive wOBA ($r$)')
     
-    ax1.set_title('Year-over-Year Autocorrelation by Pitch Filter\n(DVA Reaches r > 0.83 at 1,000+ Pitches)', fontsize=13, fontweight='bold', pad=12)
+    peak_r = df['DVA_YoY_r'].max() if 'DVA_YoY_r' in df.columns else 0.83
+    ax1.set_title(f'Year-over-Year Autocorrelation by Pitch Filter\n(DVA Peak Autocorrelation r = {peak_r:.3f})', fontsize=13, fontweight='bold', pad=12)
     ax1.set_xlabel('Minimum Pitches Seen in Season (Threshold)', fontsize=11, fontweight='bold')
     ax1.set_ylabel('Pearson Correlation ($r$)', fontsize=11, fontweight='bold')
     ax1.set_ylim(0.3, 0.9)
@@ -90,14 +91,17 @@ def plot_sensitivity(df, save_path):
     ax2.plot(x, df['Extended_wOBA_R2'], marker='o', linewidth=2.8, markersize=8, color='#2a9d8f', label='Extended (+ DVA Rating)')
     ax2.plot(x, df['Base_wOBA_R2'], marker='s', linewidth=2.4, markersize=7, color='#6c757d', linestyle='--', label='Baseline (Prior wOBA + Chase Rate)')
     
-    ax2.set_title(r'Forecasting Future wOBA (Year N+1)' + '\n' + r'(Incremental Lift Reaches $\Delta R^2 = +0.018$, F=18.12, p < 0.0001)', fontsize=13, fontweight='bold', pad=12)
+    peak_delta = df['Delta_R2'].max() if 'Delta_R2' in df.columns else 0.018
+    sign_str = "+" if peak_delta >= 0 else ""
+    ax2.set_title(f'Forecasting Future wOBA (Year N+1)\n(Peak Incremental Lift ΔR² = {sign_str}{peak_delta:.3f})', fontsize=13, fontweight='bold', pad=12)
     ax2.set_xlabel('Minimum Pitches Seen in Season (Threshold)', fontsize=11, fontweight='bold')
     ax2.set_ylabel('Out-of-Sample Predictive $R^2$', fontsize=11, fontweight='bold')
     ax2.set_ylim(0.12, 0.28)
     ax2.legend(fontsize=10.5, frameon=True)
     
     for _, r in df.iterrows():
-        ax2.annotate(f"+{r['Delta_R2']:.3f}\n(+{r['Pct_Gain']}%)", (r['Min_Pitches'], r['Extended_wOBA_R2']), textcoords="offset points", xytext=(0, 10),
+        sign_val = "+" if r['Delta_R2'] >= 0 else ""
+        ax2.annotate(f"{sign_val}{r['Delta_R2']:.3f}\n({sign_val}{r['Pct_Gain']}%)", (r['Min_Pitches'], r['Extended_wOBA_R2']), textcoords="offset points", xytext=(0, 10),
                      ha='center', fontsize=9, fontweight='bold', color='#2a9d8f')
                      
     plt.suptitle('Sample Size Sensitivity Analysis: Filtering Noise Isolates True-Talent Decision Quality',

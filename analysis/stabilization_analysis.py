@@ -12,8 +12,14 @@ if _PROJECT_ROOT not in sys.path:
 os.chdir(_PROJECT_ROOT)
 
 
+from src.swing_model import (
+    LeagueSwingModel, BayesianBatterModel, 
+    compute_dva, estimate_eb_shrinkage
+)
+
+
 def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500, 750, 1000]):
-    """Computes split-half reliability curves for DVA vs traditional chase rate."""
+    """Computes split-half reliability curves for production DVA vs traditional chase rate."""
     print(f"Loading pitch-level features from {parquet_path}...")
     df = pd.read_parquet(parquet_path)
     
@@ -24,7 +30,7 @@ def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500,
         
     print(f"Loaded {len(df):,} pitches across {df['batter'].nunique():,} unique batters.")
     
-    # Filter batters with at least 1,000 pitches
+    # Filter batters with at least max(sample_sizes) pitches
     counts = df.groupby('batter').size()
     qualified_batters = counts[counts >= max(sample_sizes)].index.values
     print(f"Qualified batters with >= {max(sample_sizes)} pitches: {len(qualified_batters)}")
@@ -43,14 +49,29 @@ def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500,
     if sort_cols:
         sub_df = sub_df.sort_values(sort_cols)
         
+    # Ensure production DVA metrics (EV-DVA & Alignment DVA) are computed
+    if 'ev_dva' not in sub_df.columns:
+        print("Scoring pitches with production LeagueSwingModel and BayesianBatterModel...")
+        model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model_2025')
+        if not os.path.exists(model_path + '.xgb'):
+            model_path = os.path.join(_PROJECT_ROOT, 'data', 'models', 'swing_model')
+        league_model = LeagueSwingModel()
+        league_model.load(model_path)
+        bayesian_model = BayesianBatterModel(kappa=30.0)
+        bayesian_model.fit(sub_df, league_model.predict(sub_df))
+        sub_df = compute_dva(sub_df, league_model, bayesian_model)
+        
+    k_star_ev, _, _ = estimate_eb_shrinkage(sub_df, residual_col='ev_dva', batter_col='batter')
+    k_star_align, _, _ = estimate_eb_shrinkage(sub_df, residual_col='alignment_dva', batter_col='batter')
+    print(f"Empirical Bayes shrinkage constants: K*(EV-DVA) = {k_star_ev:.1f}, K*(Alignment) = {k_star_align:.1f}")
+
     results = []
     
     for N in sample_sizes:
         print(f"  Evaluating stabilization at N = {N} pitches...")
-        batters_dva_odd = []
-        batters_dva_even = []
-        batters_chase_odd = []
-        batters_chase_even = []
+        batters_ev_odd, batters_ev_even = [], []
+        batters_align_odd, batters_align_even = [], []
+        batters_chase_odd, batters_chase_even = [], []
         
         for b_id, b_pitches in sub_df.groupby('batter'):
             sample = b_pitches.iloc[:N]
@@ -58,11 +79,19 @@ def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500,
             # Split odd and even pitches
             odd = sample.iloc[0::2]
             even = sample.iloc[1::2]
+            n_o, n_e = len(odd), len(even)
             
-            # Decision quality metric (strike agreement: swing when p_strike > 0.5, take when p_strike <= 0.5)
-            # Alignment: swing * (p_strike - 0.5) + take * (0.5 - p_strike)
-            dva_odd = ((odd['is_swing'] * (odd['lstm_p_strike'] - 0.5)) + ((1 - odd['is_swing']) * (0.5 - odd['lstm_p_strike']))).mean()
-            dva_even = ((even['is_swing'] * (even['lstm_p_strike'] - 0.5)) + ((1 - even['is_swing']) * (0.5 - even['lstm_p_strike']))).mean()
+            # Production EV-DVA with Empirical Bayes shrinkage
+            raw_ev_odd = odd['ev_dva'].mean()
+            raw_ev_even = even['ev_dva'].mean()
+            dva_ev_odd = (n_o / (n_o + k_star_ev)) * raw_ev_odd
+            dva_ev_even = (n_e / (n_e + k_star_ev)) * raw_ev_even
+            
+            # Production Alignment DVA with Empirical Bayes shrinkage
+            raw_align_odd = odd['alignment_dva'].mean()
+            raw_align_even = even['alignment_dva'].mean()
+            dva_align_odd = (n_o / (n_o + k_star_align)) * raw_align_odd
+            dva_align_even = (n_e / (n_e + k_star_align)) * raw_align_even
             
             # Chase rate on out-of-zone pitches
             oz_odd = odd[odd['in_zone'] == 0]
@@ -71,14 +100,19 @@ def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500,
             chase_odd = oz_odd['is_swing'].mean() if len(oz_odd) > 5 else np.nan
             chase_even = oz_even['is_swing'].mean() if len(oz_even) > 5 else np.nan
             
-            batters_dva_odd.append(dva_odd)
-            batters_dva_even.append(dva_even)
+            batters_ev_odd.append(dva_ev_odd)
+            batters_ev_even.append(dva_ev_even)
+            batters_align_odd.append(dva_align_odd)
+            batters_align_even.append(dva_align_even)
             batters_chase_odd.append(chase_odd)
             batters_chase_even.append(chase_even)
             
         # Compute Pearson r and Spearman-Brown corrected reliability
-        r_dva, _ = stats.pearsonr(batters_dva_odd, batters_dva_even)
-        sb_dva = (2 * r_dva) / (1 + r_dva)
+        r_ev, _ = stats.pearsonr(batters_ev_odd, batters_ev_even)
+        sb_ev = (2 * r_ev) / (1 + r_ev)
+        
+        r_align, _ = stats.pearsonr(batters_align_odd, batters_align_even)
+        sb_align = (2 * r_align) / (1 + r_align)
         
         # Filter valid chase rate pairs
         chase_pairs = [(o, e) for o, e in zip(batters_chase_odd, batters_chase_even) if np.isfinite(o) and np.isfinite(e)]
@@ -91,7 +125,8 @@ def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500,
             
         results.append({
             'N_Pitches': N,
-            'DVA_SplitHalf_r': round(sb_dva, 4),
+            'DVA_SplitHalf_r': round(sb_ev, 4),
+            'Alignment_DVA_SplitHalf_r': round(sb_align, 4),
             'Chase_SplitHalf_r': round(sb_chase, 4) if np.isfinite(sb_chase) else None
         })
         
@@ -99,12 +134,16 @@ def compute_split_half_curve(parquet_path, sample_sizes=[50, 100, 200, 300, 500,
 
 
 def plot_stabilization_curve(res_df, save_path):
-    """Plots the stabilization curve comparing DVA vs Chase Rate."""
+    """Plots the stabilization curve comparing production DVA vs Chase Rate."""
     fig, ax = plt.subplots(figsize=(10, 6))
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     
     ax.plot(res_df['N_Pitches'], res_df['DVA_SplitHalf_r'], marker='o', linewidth=2.8, markersize=8,
-            color='#2a9d8f', label='Perceptual Decision Value (DVA)')
+            color='#2a9d8f', label='Expected Value DVA (EV-DVA)')
+            
+    if 'Alignment_DVA_SplitHalf_r' in res_df.columns and res_df['Alignment_DVA_SplitHalf_r'].dropna().any():
+        ax.plot(res_df['N_Pitches'], res_df['Alignment_DVA_SplitHalf_r'], marker='^', linewidth=2.2, markersize=7,
+                color='#1d3557', linestyle='-.', label='Alignment DVA (Zone Recognition)')
             
     if 'Chase_SplitHalf_r' in res_df.columns and res_df['Chase_SplitHalf_r'].dropna().any():
         ax.plot(res_df['N_Pitches'], res_df['Chase_SplitHalf_r'], marker='s', linewidth=2.5, markersize=7,

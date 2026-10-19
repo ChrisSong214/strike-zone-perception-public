@@ -76,3 +76,81 @@ def test_fast_eye_scorer_fit_success():
     assert np.isfinite(sigma)
     assert np.isfinite(loss)
     assert sigma > 0.0
+
+
+def test_count_run_values_coverage():
+    """Verify all 12 (balls, strikes) states are defined in RE24 count transition table."""
+    from src.swing_model import COUNT_RUN_VALUES
+    assert len(COUNT_RUN_VALUES) == 12
+    for b in range(4):
+        for s in range(3):
+            assert (b, s) in COUNT_RUN_VALUES
+            entry = COUNT_RUN_VALUES[(b, s)]
+            assert entry['rv_ball'] > 0  # Ball always adds positive run expectancy for batter
+            assert entry['rv_called_strike'] < 0  # Strike always reduces run expectancy
+            assert entry['rv_called_strike'] < entry['rv_ball']
+
+
+def test_ev_take_3_0_vs_0_2_asymmetry():
+    """Verify Issue 2 resolution: on 3-0 taking an 80% strike is superior to swinging, unlike 0-2."""
+    from src.swing_model import estimate_ev_take, estimate_ev_swing
+    
+    # 3-0 count: 80% strike
+    ev_take_30 = estimate_ev_take(p_strike=[0.80], balls=[3], strikes=[0])[0]
+    ev_swing_30 = estimate_ev_swing(p_strike=[0.80], balls=[3], strikes=[0])[0]
+    # On 3-0, taking an 80% strike yields higher expected run value than swinging
+    assert ev_take_30 > ev_swing_30
+    
+    # 0-2 count: 45% strike
+    ev_take_02 = estimate_ev_take(p_strike=[0.45], balls=[0], strikes=[2])[0]
+    ev_swing_02 = estimate_ev_swing(p_strike=[0.45], balls=[0], strikes=[2])[0]
+    # On 0-2, taking a 45% strike is catastrophic (high probability of strikeout)
+    assert ev_take_02 < ev_swing_02
+
+
+def test_estimate_eb_shrinkage():
+    """Verify Empirical Bayes variance components estimation."""
+    from src.swing_model import estimate_eb_shrinkage
+    np.random.seed(42)
+    # 20 batters, 100 pitches each
+    batters = []
+    residuals = []
+    true_tau = 0.05
+    true_sigma = 0.20
+    
+    for b in range(20):
+        u_b = np.random.normal(0, true_tau)
+        for _ in range(100):
+            batters.append(b)
+            residuals.append(u_b + np.random.normal(0, true_sigma))
+            
+    test_df = pd.DataFrame({'batter': batters, 'ev_dva': residuals})
+    k_star, s2_w, t2_b = estimate_eb_shrinkage(test_df, residual_col='ev_dva', batter_col='batter')
+    
+    assert np.isfinite(k_star)
+    assert k_star > 0
+    assert np.isclose(s2_w, true_sigma**2, rtol=0.25)
+
+
+def test_dual_baseline_feature_sets():
+    """Verify dual baseline feature sets: final_location vs decision_time."""
+    from src.swing_model import FINAL_LOCATION_FEATURES, DECISION_TIME_FEATURES, LeagueSwingModel
+
+    # Decision time features must NOT contain final location features
+    final_location_specific = ['plate_x', 'plate_z', 'loc_x_norm', 'loc_z_norm', 'dist_from_center', 'in_zone']
+    for f in final_location_specific:
+        assert f in FINAL_LOCATION_FEATURES
+        assert f not in DECISION_TIME_FEATURES
+
+    # Decision time features must contain early LSTM perceptual features
+    early_features = ['lstm_mu_x', 'lstm_mu_z', 'lstm_sigma_x', 'lstm_sigma_z', 'lstm_rho', 'lstm_p_strike']
+    for f in early_features:
+        assert f in DECISION_TIME_FEATURES
+
+    # Models instantiate with correct mode
+    lm_posthoc = LeagueSwingModel(feature_mode='final_location')
+    assert lm_posthoc.feature_mode == 'final_location'
+
+    lm_perc = LeagueSwingModel(feature_mode='decision_time')
+    assert lm_perc.feature_mode == 'decision_time'
+

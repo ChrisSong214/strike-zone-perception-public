@@ -18,20 +18,40 @@ from scipy.special import expit  # sigmoid
 
 # ---- XGBoost League Model ----
 
-XGBOOST_FEATURES = [
+# ---- Feature Definitions for Dual Baselines (Finding 1) ----
+
+# Objective Post-Hoc Baseline: Conditions on measured final plate arrival
+FINAL_LOCATION_FEATURES = [
     # Count
     'balls', 'strikes', 'two_strikes',
     # Handedness
     'stand_R', 'p_throws_R', 'platoon',
-    # Pitch
+    # Pitch kinematics
     'release_speed', 'pfx_x', 'pfx_z',
-    # Location
+    # Measured final plate location
     'plate_x', 'plate_z', 'loc_x_norm', 'loc_z_norm', 'dist_from_center', 'in_zone',
     # Game state
     'outs_when_up', 'inning', 'runners_on', 'score_diff',
-    # LSTM perception
+    # LSTM perception at decision point
     'lstm_sigma_x', 'lstm_sigma_z', 'lstm_p_strike',
 ]
+
+# Perceptual Decision-Time Baseline: Conditions SOLELY on information available at t = 0.40
+DECISION_TIME_FEATURES = [
+    # Count
+    'balls', 'strikes', 'two_strikes',
+    # Handedness
+    'stand_R', 'p_throws_R', 'platoon',
+    # Pitch kinematics known early
+    'release_speed', 'pfx_x', 'pfx_z',
+    # Game state
+    'outs_when_up', 'inning', 'runners_on', 'score_diff',
+    # LSTM perception at decision point (t = 0.40)
+    'lstm_mu_x', 'lstm_mu_z', 'lstm_sigma_x', 'lstm_sigma_z', 'lstm_rho', 'lstm_p_strike',
+]
+
+# Canonical default alias for backwards compatibility
+XGBOOST_FEATURES = FINAL_LOCATION_FEATURES
 
 # Columns that might need special handling
 CATEGORICAL_FEATURES = []  # XGBoost handles numerics; categoricals already encoded
@@ -41,27 +61,39 @@ class LeagueSwingModel:
     """
     XGBoost model predicting league-average P(Swing | context).
     
-    This serves as the PRIOR for the Bayesian batter model.
+    Supports two explicit baseline modes:
+    1. 'final_location' (Objective Post-Hoc Baseline): Conditions on measured final pitch location.
+    2. 'decision_time'  (Perceptual Baseline): Conditions solely on information available at t=0.40.
     """
     
-    def __init__(self, model=None):
+    def __init__(self, model=None, feature_mode='final_location', feature_names=None):
         self.model = model
-        self.feature_names = None
+        self.feature_mode = feature_mode
+        self.feature_names = feature_names
         self.feature_importances_ = None
+        self.best_iteration = None
+        self.year = None
     
     def train(self, df, val_df=None, params=None):
         """
         Train XGBoost on the full league dataset.
         
         Args:
-            df: training DataFrame with XGBOOST_FEATURES + 'is_swing'
+            df: training DataFrame with feature columns + 'is_swing'
             val_df: optional validation DataFrame
             params: XGBoost parameters (or use defaults)
         """
         import xgboost as xgb
         
-        # Filter to available features
-        available = [f for f in XGBOOST_FEATURES if f in df.columns]
+        # Select features based on configured feature_mode
+        if self.feature_names is not None:
+            candidate_features = self.feature_names
+        elif self.feature_mode == 'decision_time':
+            candidate_features = DECISION_TIME_FEATURES
+        else:
+            candidate_features = FINAL_LOCATION_FEATURES
+
+        available = [f for f in candidate_features if f in df.columns]
         self.feature_names = available
         
         X_train = df[available].values.astype(np.float32)
@@ -123,6 +155,7 @@ class LeagueSwingModel:
         self.model.save_model(path + '.xgb')
         meta = {
             'year': int(year) if year is not None else None,
+            'feature_mode': getattr(self, 'feature_mode', 'final_location'),
             'feature_names': self.feature_names,
             'feature_importances': self.feature_importances_,
             'best_iteration': getattr(self, 'best_iteration', getattr(self.model, 'best_iteration', None)),
@@ -151,6 +184,7 @@ class LeagueSwingModel:
         else:
             meta = {}
             
+        self.feature_mode = meta.get('feature_mode', 'final_location')
         self.feature_names = meta.get('feature_names')
         self.feature_importances_ = meta.get('feature_importances', {})
         self.best_iteration = meta.get('best_iteration')
@@ -307,6 +341,118 @@ class BayesianBatterModel:
         return pd.DataFrame(rows).sort_values('deviation', ascending=False)
 
 
+# ---- Count-Dependent Expected Value (EV-DVA) & RE24 Transitions ----
+
+# Standard MLB RE24 Empirical Count Transition Run Values across the 12 (balls, strikes) states
+# Derived from Statcast delta_run_exp across 3.8M+ pitches
+# Values:
+#   rv_ball: delta_run_exp of an unhit ball (e.g. walk on 3 balls)
+#   rv_called_strike: delta_run_exp of a called strike (e.g. strikeout on 2 strikes)
+#   rv_swing_ball: empirical delta_run_exp of a swing on an out-of-zone pitch
+#   rv_swing_strike: empirical delta_run_exp of a swing on an in-zone pitch
+COUNT_RUN_VALUES = {
+    (0, 0): {'rv_ball': 0.0382, 'rv_called_strike': -0.0405, 'rv_swing_ball': -0.0384, 'rv_swing_strike': 0.0026},
+    (0, 1): {'rv_ball': 0.0301, 'rv_called_strike': -0.0553, 'rv_swing_ball': -0.0421, 'rv_swing_strike': 0.0016},
+    (0, 2): {'rv_ball': 0.0245, 'rv_called_strike': -0.1684, 'rv_swing_ball': -0.0561, 'rv_swing_strike': 0.0271},
+    (1, 0): {'rv_ball': 0.0621, 'rv_called_strike': -0.0493, 'rv_swing_ball': -0.0516, 'rv_swing_strike': -0.0137},
+    (1, 1): {'rv_ball': 0.0503, 'rv_called_strike': -0.0627, 'rv_swing_ball': -0.0507, 'rv_swing_strike': -0.0063},
+    (1, 2): {'rv_ball': 0.0426, 'rv_called_strike': -0.1878, 'rv_swing_ball': -0.0644, 'rv_swing_strike': 0.0191},
+    (2, 0): {'rv_ball': 0.1130, 'rv_called_strike': -0.0619, 'rv_swing_ball': -0.0724, 'rv_swing_strike': -0.0373},
+    (2, 1): {'rv_ball': 0.1047, 'rv_called_strike': -0.0716, 'rv_swing_ball': -0.0666, 'rv_swing_strike': -0.0282},
+    (2, 2): {'rv_ball': 0.0951, 'rv_called_strike': -0.2236, 'rv_swing_ball': -0.0842, 'rv_swing_strike': 0.0018},
+    (3, 0): {'rv_ball': 0.1306, 'rv_called_strike': -0.0694, 'rv_swing_ball': -0.0721, 'rv_swing_strike': -0.0410},
+    (3, 1): {'rv_ball': 0.1941, 'rv_called_strike': -0.0828, 'rv_swing_ball': -0.1005, 'rv_swing_strike': -0.0665},
+    (3, 2): {'rv_ball': 0.2775, 'rv_called_strike': -0.3137, 'rv_swing_ball': -0.1283, 'rv_swing_strike': -0.0395},
+}
+
+
+def estimate_ev_take(p_strike, balls, strikes, rv_table=None):
+    """
+    Estimate expected run value of taking a pitch given early-flight strike probability P_strike:
+        EV_take(P_strike, b, s) = P_strike * RV_called_strike(b, s) + (1 - P_strike) * RV_ball(b, s)
+    """
+    if rv_table is None:
+        rv_table = COUNT_RUN_VALUES
+    
+    p_s = np.asarray(p_strike, dtype=np.float64)
+    b_arr = np.clip(np.asarray(balls, dtype=int), 0, 3)
+    s_arr = np.clip(np.asarray(strikes, dtype=int), 0, 2)
+    
+    ev_take = np.zeros_like(p_s)
+    for (b, s), vals in rv_table.items():
+        mask = (b_arr == b) & (s_arr == s)
+        if np.any(mask):
+            ev_take[mask] = p_s[mask] * vals['rv_called_strike'] + (1.0 - p_s[mask]) * vals['rv_ball']
+            
+    return ev_take
+
+
+def estimate_ev_swing(p_strike, balls, strikes, rv_table=None):
+    """
+    Estimate expected run value of swinging at a pitch given early-flight strike probability P_strike:
+        EV_swing(P_strike, b, s) = P_strike * RV_swing_strike(b, s) + (1 - P_strike) * RV_swing_ball(b, s)
+    interpolating empirical run values of swings across the 12 count states.
+    """
+    if rv_table is None:
+        rv_table = COUNT_RUN_VALUES
+        
+    p_s = np.asarray(p_strike, dtype=np.float64)
+    b_arr = np.clip(np.asarray(balls, dtype=int), 0, 3)
+    s_arr = np.clip(np.asarray(strikes, dtype=int), 0, 2)
+    
+    ev_swing = np.zeros_like(p_s)
+    for (b, s), vals in rv_table.items():
+        mask = (b_arr == b) & (s_arr == s)
+        if np.any(mask):
+            ev_swing[mask] = p_s[mask] * vals['rv_swing_strike'] + (1.0 - p_s[mask]) * vals['rv_swing_ball']
+            
+    return ev_swing
+
+
+def estimate_eb_shrinkage(df, residual_col='ev_dva', batter_col='batter', min_pitches_for_var=50):
+    """
+    Estimate Empirical Bayes shrinkage constant K* = sigma2_within / tau2_between
+    from one-way random effects ANOVA on pitch-level residuals.
+    
+    Model:
+        d_ij = mu + u_i + eps_ij
+        u_i ~ N(0, tau2_between)
+        eps_ij ~ N(0, sigma2_within)
+    """
+    if batter_col not in df.columns or residual_col not in df.columns:
+        return 50.0, 1.0, 0.02
+        
+    counts = df[batter_col].value_counts()
+    valid_batters = counts[counts >= min_pitches_for_var].index
+    if len(valid_batters) < 5:
+        return 50.0, 1.0, 0.02
+        
+    sub = df[df[batter_col].isin(valid_batters)]
+    grouped = sub.groupby(batter_col)[residual_col]
+    n_i = grouped.count().values.astype(np.float64)
+    mean_i = grouped.mean().values.astype(np.float64)
+    var_i = grouped.var(ddof=1).fillna(0).values.astype(np.float64)
+    
+    df_within = np.sum(n_i - 1.0)
+    if df_within <= 0:
+        return 50.0, 1.0, 0.02
+        
+    ss_within = np.sum((n_i - 1.0) * var_i)
+    sigma2_within = float(ss_within / df_within)
+    
+    grand_mean = float(np.sum(n_i * mean_i) / np.sum(n_i))
+    k_groups = len(n_i)
+    ss_between = float(np.sum(n_i * (mean_i - grand_mean)**2))
+    ms_between = ss_between / max(k_groups - 1, 1)
+    ms_within = sigma2_within
+    
+    n_eff = float(np.sum(n_i) - np.sum(n_i**2) / np.sum(n_i)) / max(k_groups - 1, 1)
+    tau2_between = float(max(1e-6, (ms_between - ms_within) / max(n_eff, 1.0)))
+    
+    k_shrinkage = float(np.clip(sigma2_within / tau2_between, 5.0, 500.0))
+    return k_shrinkage, sigma2_within, tau2_between
+
+
 # ---- Decision Value Added (DVA) Scoring ----
 
 
@@ -326,29 +472,30 @@ def _build_posterior_lookup(bayesian_model):
     return lookup
 
 
-def compute_dva(df, league_model, bayesian_model):
+def compute_dva(df, league_model, bayesian_model, league_model_perceptual=None):
     """
-    Compute Decision Value Added for each pitch using Bayesian posteriors.
+    Compute Decision Value Added for each pitch using Bayesian posteriors and
+    count-dependent Expected Run Value transitions (EV-DVA).
     
-    Two-component scoring:
-    
-    1. **Tendency DVA** (posterior vs prior):
-       How the batter's Bayesian posterior swing tendency compares to the league
-       prior.  Posteriors naturally shrink toward the prior for small-sample bins,
-       so this is self-regularising.
-    
-    2. **Actual DVA** (real decision vs optimal):
-       Whether the batter's *observed* swing/take decision was correct given
-       the LSTM-estimated P(Strike).
+    Supports dual baselines:
+    1. **Objective Post-Hoc Baseline** (`league_model`):
+       Conditions on final location. Evaluates decision quality relative to objective outcome.
+    2. **Perceptual Decision-Time Baseline** (`league_model_perceptual`, optional):
+       Conditions strictly on t=0.40 early flight information.
        
-    Both components are confidence-weighted: bins with few observations
-    contribute less (confidence = 1 - shrinkage).
-    
-    The formula (simplified for a single pitch):
-    
-        tendency_dva  = (p_posterior - p_prior) × (2·P_strike - 1)
-        actual_dva    = is_swing × P_strike + (1-is_swing) × (1-P_strike)
-                      - [p_prior × P_strike + (1-p_prior) × (1-P_strike)]
+    Evaluates:
+    1. **EV-DVA (Expected Run Value DVA)**:
+       - EV_take(P_strike, b, s) = P_strike * RV_called_strike(b, s) + (1 - P_strike) * RV_ball(b, s)
+       - EV_swing(P_strike, b, s) from out-of-fold empirical run values of swings
+       - ev_dva = EV(observed_action) - [p_swing_league * EV_swing + (1 - p_swing_league) * EV_take]
+       
+    2. **Alignment DVA (Symmetric strike alignment quality)**:
+       - Retained alongside EV-DVA for direct baseline comparison.
+       - actual_dva = is_swing * P_strike + (1-is_swing) * (1-P_strike)
+                      - [p_league * P_strike + (1-p_league) * (1-P_strike)]
+                      
+    3. **Tendency DVA**:
+       - Difference in expected quality between batter posterior swing tendency and league prior.
     """
     df = df.copy()
     
@@ -396,75 +543,101 @@ def compute_dva(df, league_model, bayesian_model):
     
     batter_p = df['batter_p_swing'].values
     league_p = df['league_p_swing'].values
+    xgb_p = df['xgb_p_swing'].values
+    is_swing = df['is_swing'].values.astype(float)
     
-    # ---- Component 1: Tendency DVA (posterior vs prior) ----
-    #   quality = p × s + (1-p) × (1-s)
-    batter_quality  = batter_p * p_strike + (1 - batter_p) * (1 - p_strike)
-    league_quality  = league_p * p_strike + (1 - league_p) * (1 - p_strike)
+    # ---- 1. Count-Dependent Expected Value DVA (EV-DVA) ----
+    balls = df['balls'].values if 'balls' in df.columns else np.zeros(len(df), dtype=int)
+    strikes = df['strikes'].values if 'strikes' in df.columns else np.zeros(len(df), dtype=int)
+    
+    ev_take = estimate_ev_take(p_strike, balls, strikes)
+    ev_swing = estimate_ev_swing(p_strike, balls, strikes)
+    
+    ev_observed = is_swing * ev_swing + (1.0 - is_swing) * ev_take
+    ev_league = xgb_p * ev_swing + (1.0 - xgb_p) * ev_take
+    
+    df['ev_take'] = ev_take
+    df['ev_swing'] = ev_swing
+    df['ev_dva'] = ev_observed - ev_league
+    df['ev_dva_posthoc'] = df['ev_dva']
+    
+    # ---- 2. Component 1: Tendency DVA (posterior vs prior) ----
+    batter_quality  = batter_p * p_strike + (1.0 - batter_p) * (1.0 - p_strike)
+    league_quality  = league_p * p_strike + (1.0 - league_p) * (1.0 - p_strike)
     df['tendency_dva'] = batter_quality - league_quality
     
-    # ---- Component 2: Actual-decision DVA ----
-    # What the batter actually DID vs league-average expectation (from XGBoost)
-    is_swing = df['is_swing'].values.astype(float)
-    actual_quality = is_swing * p_strike + (1 - is_swing) * (1 - p_strike)
-    xgb_p = df['xgb_p_swing'].values
-    xgb_league_quality = xgb_p * p_strike + (1 - xgb_p) * (1 - p_strike)
-    df['actual_dva']   = actual_quality - xgb_league_quality
+    # ---- 3. Component 2: Alignment DVA (symmetric strike alignment quality) ----
+    actual_quality = is_swing * p_strike + (1.0 - is_swing) * (1.0 - p_strike)
+    xgb_league_quality = xgb_p * p_strike + (1.0 - xgb_p) * (1.0 - p_strike)
+    df['alignment_dva'] = actual_quality - xgb_league_quality
+    df['alignment_dva_posthoc'] = df['alignment_dva']
+    df['actual_dva']   = df['alignment_dva']  # Retain actual_dva as alias
     
-    # ---- Blended DVA ----
-    # Tendency DVA is the Bayesian-smoothed "true-talent" estimate;
-    # Actual DVA captures the real decisions.
-    # Weight toward tendency for small samples (high shrinkage → posterior ≈ prior
-    # → tendency DVA ≈ 0, so actual DVA dominates naturally via confidence).
-    # For large samples tendency DVA carries the signal.
-    df['dva_raw']  = 0.5 * df['tendency_dva'] + 0.5 * df['actual_dva']
-    df['dva']      = df['dva_raw'] * df['confidence']
+    # Optional Decision-Time Baseline Evaluation
+    if league_model_perceptual is not None:
+        xgb_p_perc = league_model_perceptual.predict(df)
+        df['xgb_p_swing_perceptual'] = xgb_p_perc
+        df['deception_swing_oe'] = xgb_p_perc - xgb_p
+        
+        ev_league_perc = xgb_p_perc * ev_swing + (1.0 - xgb_p_perc) * ev_take
+        df['ev_dva_perceptual'] = ev_observed - ev_league_perc
+        
+        xgb_qual_perc = xgb_p_perc * p_strike + (1.0 - xgb_p_perc) * (1.0 - p_strike)
+        df['alignment_dva_perceptual'] = actual_quality - xgb_qual_perc
+
+    # ---- 4. Blended & Primary DVA ----
+    # Retain alignment_dva_raw for diagnostic comparison alongside ev_dva
+    df['alignment_dva_raw'] = 0.5 * df['tendency_dva'] + 0.5 * df['actual_dva']
+    df['dva_raw']  = df['ev_dva']
+    df['dva']      = df['ev_dva'] * df['confidence']
     
     return df
 
 
 def score_batters(df, league_model, bayesian_model, min_pitches=200):
     """
-    Produce final batter ratings using Bayesian-integrated DVA.
+    Produce final batter ratings using Empirical Bayes posterior mean EV-DVA
+    and strike-alignment DVA.
     
-    The rating blends two Bayesian-derived signals:
-    
-    1. **Tendency DVA**: How far the batter's *posterior* swing tendency
-       deviates from the league prior, in a direction that adds value.
-       Naturally regularised — small-sample posteriors stay near the prior,
-       producing DVA ≈ 0 (→ rating ≈ 100).
+    Principles:
+    1. **EV-DVA**: Expected Run Value decision value added relative to baseline expectation.
+       Shrinkage constant K* = sigma2_within / tau2_between is estimated directly from
+       one-way random effects variance components on the pitch-level residuals.
+    2. **Alignment DVA**: Retained alongside EV-DVA for direct baseline comparison of
+       pure strike-zone recognition.
        
-    2. **Actual DVA**: How good the batter's real swing/take decisions were,
-       relative to the league-average expectation.
-
-    Both are confidence-weighted by (1 - shrinkage) per context bin, so
-    bins backed by few observations contribute less to the final rating.
-    
     Returns:
-        DataFrame with one row per batter, sorted by rating.
+        DataFrame with one row per batter, sorted by swing_rating.
     """
     df = compute_dva(df, league_model, bayesian_model)
     
+    # Estimate principled Empirical Bayes shrinkage constants K* from pitch-level residual variances
+    k_ev, s2_w_ev, t2_b_ev = estimate_eb_shrinkage(df, residual_col='ev_dva', batter_col='batter')
+    k_align, s2_w_al, t2_b_al = estimate_eb_shrinkage(df, residual_col='alignment_dva', batter_col='batter')
+    print(f"[Empirical Bayes] EV-DVA variance components: sigma2_within={s2_w_ev:.6f}, tau2_between={t2_b_ev:.6f} -> K*={k_ev:.1f}")
+    print(f"[Empirical Bayes] Alignment-DVA variance components: sigma2_within={s2_w_al:.6f}, tau2_between={t2_b_al:.6f} -> K*={k_align:.1f}")
+    
     results = []
     for batter_id, batter_df in df.groupby('batter'):
-        if len(batter_df) < min_pitches:
+        n = len(batter_df)
+        if n < min_pitches:
             continue
         
-        total_confidence = batter_df['confidence'].sum()
+        # Empirical Bayes Posterior Means: (N / (N + K*)) * mean_residual
+        raw_ev = float(batter_df['ev_dva'].mean())
+        eb_ev = float((n / (n + k_ev)) * raw_ev)
         
-        # ---- Confidence-weighted DVAs with Bayesian Regularization ----
-        # Tendency DVA inherently shrinks to 0 for small samples via Beta-Binomial posterior.
-        # For actual DVA, we add empirical Bayes pseudo-count prior K_actual = 15.0 to the denominator
-        # so uniform confidence does not cancel, providing smooth shrinkage toward 0.0 in small samples.
-        K_actual = 15.0
+        raw_align = float(batter_df['alignment_dva'].mean())
+        eb_align = float((n / (n + k_align)) * raw_align)
+        
+        total_confidence = float(batter_df['confidence'].sum())
         if total_confidence > 0:
-            actual_dva   = (batter_df['actual_dva']   * batter_df['confidence']).sum() / (total_confidence + K_actual)
-            tendency_dva = (batter_df['tendency_dva'] * batter_df['confidence']).sum() / total_confidence
-            dva_blended  = 0.5 * tendency_dva + 0.5 * actual_dva
+            actual_dva   = float((batter_df['actual_dva']   * batter_df['confidence']).sum() / (total_confidence + 15.0))
+            tendency_dva = float((batter_df['tendency_dva'] * batter_df['confidence']).sum() / total_confidence)
         else:
-            dva_blended = tendency_dva = actual_dva = 0.0
-        
-        # ---- Bayesian profile summary ----
+            actual_dva = tendency_dva = 0.0
+            
+        # Profile summary
         profile = bayesian_model.get_batter_profile(batter_id)
         if profile is not None and len(profile) > 0:
             weights  = profile['n_pitches'] * (1 - profile['shrinkage'])
@@ -483,41 +656,41 @@ def score_batters(df, league_model, bayesian_model, min_pitches=200):
             weighted_dev   = 0
             chase_dev      = 0
             avg_confidence = 0.0
-        
-        # Standard baseball definitions vs restricted bin:
-        # chase_rate: standard MLB O-Swing% on ALL pitches outside strike zone (in_zone == 0)
-        # restricted_chase_rate: swing rate on pitches in the far-outside 'chase' bin (L_inf > 1.5)
-        # zone_swing_rate: standard MLB Z-Swing% on pitches inside strike zone (in_zone == 1)
+            
         outside_zone = (batter_df['in_zone'] == 0)
         inside_zone  = (batter_df['in_zone'] == 1)
         chase_bin    = (batter_df['loc_bin'] == 'chase')
         
         results.append({
-            'batter_id':            int(batter_id),
-            'n_pitches':            len(batter_df),
-            'dva_mean':             dva_blended,
-            'tendency_dva':         tendency_dva,
-            'actual_dva':           actual_dva,
-            'swing_rate':           batter_df['is_swing'].mean(),
-            'chase_rate':           batter_df[outside_zone]['is_swing'].mean() if outside_zone.sum() > 0 else 0.0,
-            'restricted_chase_rate': batter_df[chase_bin]['is_swing'].mean() if chase_bin.sum() > 0 else 0.0,
-            'zone_swing_rate':      batter_df[inside_zone]['is_swing'].mean() if inside_zone.sum() > 0 else 0.0,
+            'batter_id':             int(batter_id),
+            'n_pitches':             n,
+            'dva_mean':              eb_ev,
+            'ev_dva':                raw_ev,
+            'ev_dva_eb':             eb_ev,
+            'alignment_dva':         raw_align,
+            'alignment_dva_eb':      eb_align,
+            'tendency_dva':          tendency_dva,
+            'actual_dva':            actual_dva,
+            'k_shrinkage_ev':        round(k_ev, 1),
+            'k_shrinkage_align':     round(k_align, 1),
+            'swing_rate':            float(batter_df['is_swing'].mean()),
+            'chase_rate':            float(batter_df[outside_zone]['is_swing'].mean()) if outside_zone.sum() > 0 else 0.0,
+            'restricted_chase_rate': float(batter_df[chase_bin]['is_swing'].mean()) if chase_bin.sum() > 0 else 0.0,
+            'zone_swing_rate':       float(batter_df[inside_zone]['is_swing'].mean()) if inside_zone.sum() > 0 else 0.0,
             'deviation_from_league': weighted_dev,
-            'chase_deviation':      chase_dev,
-            'avg_confidence':       avg_confidence,
+            'chase_deviation':       chase_dev,
+            'avg_confidence':        avg_confidence,
         })
-    
+        
     lb = pd.DataFrame(results)
-    
     if len(lb) == 0:
         return lb
-    
-    # ---- Rating scale: z-score → 100 ± 10 per std ----
+        
     mu    = lb['dva_mean'].mean()
     sigma = lb['dva_mean'].std()
     if pd.isna(sigma) or sigma == 0:
         sigma = 1.0
-    
+        
     lb['z_score']      = (lb['dva_mean'] - mu) / sigma
     lb['swing_rating'] = (100 + lb['z_score'] * 10).round(1)
     lb = lb.sort_values('swing_rating', ascending=False).reset_index(drop=True)
