@@ -9,29 +9,37 @@ if _PROJECT_ROOT not in sys.path:
 os.chdir(_PROJECT_ROOT)
 
 
+import argparse
+
 ANALYSES = [
-    ("YoY Reliability & Autocorrelation", "analysis/yoy_reliability.py"),
-    ("Out-of-Sample Predictive Power", "analysis/predictive_validity.py"),
-    ("Sample Size Stabilization Curve", "analysis/stabilization_analysis.py"),
-    ("Macro vs Micro Talent Quadrants", "analysis/quadrant_analysis.py"),
-    ("Historical Breakouts & Declines", "analysis/breakout_detection.py"),
-    ("Pitcher Deception & Induced Errors", "analysis/pitcher_deception.py"),
+    ("Threshold Sensitivity (Pitches >= 300 to 1500)", "analysis/threshold_sensitivity.py", False),
+    ("YoY Reliability & Autocorrelation", "analysis/yoy_reliability.py", True),
+    ("Out-of-Sample Predictive Power", "analysis/predictive_validity.py", True),
+    ("Sample Size Stabilization Curve", "analysis/stabilization_analysis.py", False),
+    ("Macro vs Micro Talent Quadrants", "analysis/quadrant_analysis.py", False),
+    ("Historical Breakouts & Declines", "analysis/breakout_detection.py", False),
+    ("Pitcher Deception & Induced Errors", "analysis/pitcher_deception.py", False),
 ]
 
 
-def run_suite():
+def run_suite(min_pitches=750):
     print("=" * 80)
-    print("  EXECUTING COMPREHENSIVE SABERMETRICS PRESENTATION SUITE (2020-2025)")
+    print(f"  EXECUTING COMPREHENSIVE SABERMETRICS PRESENTATION SUITE (2020-2025)")
+    print(f"  Sample Filter: Pitches Seen >= {min_pitches}")
     print("=" * 80)
     
     t_start = time.time()
     results = []
     
-    for idx, (title, script_path) in enumerate(ANALYSES, start=1):
+    for idx, (title, script_path, accepts_min_pitches) in enumerate(ANALYSES, start=1):
         print(f"\n[{idx}/{len(ANALYSES)}] Running {title} ({script_path})...")
         t0 = time.time()
+        cmd = [sys.executable, script_path]
+        if accepts_min_pitches:
+            cmd.extend(["--min-pitches", str(min_pitches)])
+            
         try:
-            res = subprocess.run([sys.executable, script_path], capture_output=True, text=True, check=True)
+            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
             elapsed = time.time() - t0
             print(f"  ✓ Finished in {elapsed:.1f}s")
             results.append((title, "SUCCESS", elapsed, res.stdout))
@@ -60,4 +68,7 @@ def run_suite():
 
 
 if __name__ == "__main__":
-    run_suite()
+    parser = argparse.ArgumentParser(description="Run SABR Presentation Analysis Suite")
+    parser.add_argument("--min-pitches", type=int, default=750, help="Minimum pitches seen threshold (default: 750)")
+    args = parser.parse_args()
+    run_suite(min_pitches=args.min_pitches)

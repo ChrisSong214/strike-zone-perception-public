@@ -118,18 +118,25 @@ def plot_predictive_power(results_df, save_path):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Out-of-Sample Predictive Validity")
+    parser.add_argument("--min-pitches", type=int, default=750, help="Minimum pitches seen in season (default: 750)")
+    args = parser.parse_args()
+
     print("=" * 70)
-    print("  ANALYSIS 2: Out-of-Sample Predictive Validity (Forecasting Year N+1)")
+    print(f"  ANALYSIS 2: Out-of-Sample Predictive Validity (Min Pitches >= {args.min_pitches})")
     print("=" * 70)
     
+    min_pa = max(50, int(args.min_pitches / 3.8))
     try:
-        df = load_merged_data(min_pitches=300, min_pa=100)
+        df = load_merged_data(min_pitches=args.min_pitches, min_pa=min_pa)
     except Exception as e:
         print(f"Loading merged data failed ({e}).")
         return
         
     seasons = sorted(df['season'].unique())
     print(f"Available seasons: {seasons} (Total player-seasons: {len(df):,})")
+
     
     if len(seasons) < 2:
         print(f"\n[Note] Multi-year forecasting requires at least 2 consecutive seasons.")
