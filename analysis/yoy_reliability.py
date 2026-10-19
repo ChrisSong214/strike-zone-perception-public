@@ -17,7 +17,7 @@ from analysis.common_loader import load_merged_data, load_all_swing_ratings
 def compute_yoy_correlations(df, metrics=None):
     """Computes consecutive year-over-year correlations across paired seasons."""
     if metrics is None:
-        metrics = ['swing_rating', 'tendency_dva', 'actual_dva', 'chase_rate', 'zone_swing_rate', 'woba']
+        metrics = ['swing_rating', 'tendency_dva', 'actual_dva', 'chase_rate', 'zone_swing_rate', 'z_minus_o', 'woba']
         
     seasons = sorted(df['season'].unique())
     pairs = []
@@ -59,15 +59,17 @@ def compute_yoy_correlations(df, metrics=None):
 
 
 def plot_yoy_grid(paired_df, save_path):
-    """Plots a 4-panel comparison of Year-over-Year stability."""
-    fig, axes = plt.subplots(2, 2, figsize=(14, 12))
+    """Plots a 6-panel (2x3) comparison of Year-over-Year stability including Z-O Swing%."""
+    fig, axes = plt.subplots(2, 3, figsize=(18, 11))
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     
     panels = [
         ('swing_rating', 'Overall DVA Rating (Year N vs N+1)', '#1d3557', axes[0, 0]),
         ('tendency_dva', 'Macro Tendency DVA (Year N vs N+1)', '#2a9d8f', axes[0, 1]),
+        ('actual_dva', 'Micro Execution DVA (Year N vs N+1)', '#457b9d', axes[0, 2]),
         ('chase_rate', 'Traditional Chase Rate (Year N vs N+1)', '#e76f51', axes[1, 0]),
-        ('woba', 'Offensive Production wOBA (Year N vs N+1)', '#457b9d', axes[1, 1]),
+        ('z_minus_o', 'Z-O Swing% [Zone - Chase] (Year N vs N+1)', '#b07d62', axes[1, 1]),
+        ('woba', 'Offensive Production wOBA (Year N vs N+1)', '#6c757d', axes[1, 2]),
     ]
     
     for metric, title, color, ax in panels:

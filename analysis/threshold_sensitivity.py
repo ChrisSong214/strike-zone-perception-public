@@ -34,6 +34,8 @@ def run_threshold_sensitivity(thresholds=[300, 500, 750, 1000, 1200, 1500]):
         if yoy_res is not None and pred_res is not None:
             dva_yoy = yoy_res[yoy_res['Metric'] == 'swing_rating'].iloc[0]
             chase_yoy = yoy_res[yoy_res['Metric'] == 'chase_rate'].iloc[0]
+            zo_matches = yoy_res[yoy_res['Metric'] == 'z_minus_o']
+            zo_yoy = zo_matches.iloc[0] if len(zo_matches) > 0 else None
             woba_yoy = yoy_res[yoy_res['Metric'] == 'woba'].iloc[0]
             
             woba_pred = pred_res[pred_res['Target'] == 'WOBA'].iloc[0]
@@ -45,6 +47,8 @@ def run_threshold_sensitivity(thresholds=[300, 500, 750, 1000, 1200, 1500]):
                 'DVA_YoY_r': dva_yoy['Pearson_r'],
                 'DVA_YoY_R2': dva_yoy['R_squared'],
                 'Chase_YoY_r': chase_yoy['Pearson_r'],
+                'ZO_YoY_r': zo_yoy['Pearson_r'] if zo_yoy is not None else np.nan,
+                'ZO_YoY_R2': zo_yoy['R_squared'] if zo_yoy is not None else np.nan,
                 'wOBA_YoY_r': woba_yoy['Pearson_r'],
                 'Base_wOBA_R2': woba_pred['R2_Baseline'],
                 'Extended_wOBA_R2': woba_pred['R2_With_DVA'],
@@ -60,7 +64,7 @@ def run_threshold_sensitivity(thresholds=[300, 500, 750, 1000, 1200, 1500]):
 
 def plot_sensitivity(df, save_path):
     """Plots a dual-panel chart of YoY Reliability vs. Sample Threshold and Predictive Lift."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6.5))
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     
     x = df['Min_Pitches']
@@ -68,7 +72,9 @@ def plot_sensitivity(df, save_path):
     # Panel 1: Autocorrelation (True Talent Stickiness)
     ax1.plot(x, df['DVA_YoY_r'], marker='o', linewidth=2.8, markersize=8, color='#1d3557', label='DVA Swing Rating ($r$)')
     ax1.plot(x, df['Chase_YoY_r'], marker='s', linewidth=2.4, markersize=7, color='#e76f51', linestyle='--', label='Traditional Chase Rate ($r$)')
-    ax1.plot(x, df['wOBA_YoY_r'], marker='^', linewidth=2.2, markersize=7, color='#6c757d', linestyle=':', label='Offensive wOBA ($r$)')
+    if 'ZO_YoY_r' in df.columns and not df['ZO_YoY_r'].isna().all():
+        ax1.plot(x, df['ZO_YoY_r'], marker='^', linewidth=2.4, markersize=7, color='#b07d62', linestyle='-.', label='Z-O Swing % [Zone - Chase] ($r$)')
+    ax1.plot(x, df['wOBA_YoY_r'], marker='d', linewidth=2.0, markersize=6, color='#6c757d', linestyle=':', label='Offensive wOBA ($r$)')
     
     ax1.set_title('Year-over-Year Autocorrelation by Pitch Filter\n(DVA Reaches r > 0.83 at 1,000+ Pitches)', fontsize=13, fontweight='bold', pad=12)
     ax1.set_xlabel('Minimum Pitches Seen in Season (Threshold)', fontsize=11, fontweight='bold')
@@ -84,7 +90,7 @@ def plot_sensitivity(df, save_path):
     ax2.plot(x, df['Extended_wOBA_R2'], marker='o', linewidth=2.8, markersize=8, color='#2a9d8f', label='Extended (+ DVA Rating)')
     ax2.plot(x, df['Base_wOBA_R2'], marker='s', linewidth=2.4, markersize=7, color='#6c757d', linestyle='--', label='Baseline (Prior wOBA + Chase Rate)')
     
-    ax2.set_title('Forecasting Future wOBA (Year N+1)\n(Incremental Lift Reaches $\Delta R^2 = +0.018$, F=18.12, p < 0.0001)', fontsize=13, fontweight='bold', pad=12)
+    ax2.set_title(r'Forecasting Future wOBA (Year N+1)' + '\n' + r'(Incremental Lift Reaches $\Delta R^2 = +0.018$, F=18.12, p < 0.0001)', fontsize=13, fontweight='bold', pad=12)
     ax2.set_xlabel('Minimum Pitches Seen in Season (Threshold)', fontsize=11, fontweight='bold')
     ax2.set_ylabel('Out-of-Sample Predictive $R^2$', fontsize=11, fontweight='bold')
     ax2.set_ylim(0.12, 0.28)

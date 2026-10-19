@@ -46,6 +46,8 @@ def evaluate_predictive_power(df, target_cols=['woba', 'bb_pct', 'k_pct']):
         dva_s1 = "swing_rating_s1"
         
         required = [t_s1, t_s2, chase_s1, dva_s1]
+        if 'z_minus_o_s1' in paired_df.columns:
+            required.append('z_minus_o_s1')
         if not all(c in paired_df.columns for c in required):
             continue
             
@@ -60,6 +62,15 @@ def evaluate_predictive_power(df, target_cols=['woba', 'bb_pct', 'k_pct']):
         X1 = sub[[t_s1, chase_s1]].values
         reg1 = LinearRegression().fit(X1, y)
         r2_base = reg1.score(X1, y)
+        
+        # Model 1b: Baseline with Z-O Swing% (Prior Outcome + Z-O)
+        has_zo = 'z_minus_o_s1' in sub.columns
+        if has_zo:
+            X_zo = sub[[t_s1, 'z_minus_o_s1']].values
+            reg_zo = LinearRegression().fit(X_zo, y)
+            r2_zo = reg_zo.score(X_zo, y)
+        else:
+            r2_zo = r2_base
         
         # Model 2: Extended (Prior Outcome + Chase Rate + DVA)
         X2 = sub[[t_s1, chase_s1, dva_s1]].values
@@ -78,6 +89,8 @@ def evaluate_predictive_power(df, target_cols=['woba', 'bb_pct', 'k_pct']):
             'Target': target.upper(),
             'N_Batters': n,
             'R2_Baseline': round(r2_base, 4),
+            'R2_Baseline_Chase': round(r2_base, 4),
+            'R2_Baseline_ZO': round(r2_zo, 4),
             'R2_With_DVA': round(r2_full, 4),
             'Delta_R2': round(delta_r2, 4),
             'Pct_Improvement': round((delta_r2 / max(r2_base, 1e-4)) * 100, 1),
@@ -89,26 +102,34 @@ def evaluate_predictive_power(df, target_cols=['woba', 'bb_pct', 'k_pct']):
 
 
 def plot_predictive_power(results_df, save_path):
-    """Plots incremental R^2 bar chart showing how DVA enhances forecasting."""
-    fig, ax = plt.subplots(figsize=(10, 6))
+    """Plots incremental R^2 bar chart showing how DVA enhances forecasting vs Chase Rate and Z-O Swing%."""
+    fig, ax = plt.subplots(figsize=(11, 6.5))
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     
     x = np.arange(len(results_df))
-    width = 0.35
+    width = 0.26
     
-    r1 = ax.bar(x - width/2, results_df['R2_Baseline'], width, label='Baseline (Prior Stat + Chase Rate)', color='#6c757d', alpha=0.85)
-    r2 = ax.bar(x + width/2, results_df['R2_With_DVA'], width, label='Extended (+ DVA Rating)', color='#2a9d8f', alpha=0.95)
+    has_zo = 'R2_Baseline_ZO' in results_df.columns
+    
+    if has_zo:
+        r1 = ax.bar(x - width, results_df['R2_Baseline_Chase'], width, label='Baseline: Stat + Chase Rate', color='#6c757d', alpha=0.85)
+        r2 = ax.bar(x, results_df['R2_Baseline_ZO'], width, label='Baseline: Stat + Z-O Swing%', color='#b07d62', alpha=0.85)
+        r3 = ax.bar(x + width, results_df['R2_With_DVA'], width, label='Extended: + DVA Decision Engine', color='#2a9d8f', alpha=0.95)
+    else:
+        r1 = ax.bar(x - width/2, results_df['R2_Baseline'], width, label='Baseline: Stat + Chase Rate', color='#6c757d', alpha=0.85)
+        r3 = ax.bar(x + width/2, results_df['R2_With_DVA'], width, label='Extended: + DVA Decision Engine', color='#2a9d8f', alpha=0.95)
     
     ax.set_ylabel('Out-of-Sample Predictive $R^2$ ($N \to N+1$)', fontsize=12, fontweight='bold')
-    ax.set_title('Forecasting Future Offensive Production: Incremental Predictive Power of DVA', fontsize=14, fontweight='bold', pad=15)
+    ax.set_title('Forecasting Future Offensive Production: DVA vs. Traditional Plate Discipline', fontsize=14, fontweight='bold', pad=15)
     ax.set_xticks(x)
     ax.set_xticklabels(results_df['Target'], fontsize=12, fontweight='bold')
-    ax.legend(fontsize=11, frameon=True)
-    ax.set_ylim(0, max(results_df['R2_With_DVA'].max() * 1.25, 0.5))
+    ax.legend(fontsize=10.5, frameon=True)
+    ax.set_ylim(0, max(results_df['R2_With_DVA'].max() * 1.35, 0.35))
     
+    offset = width if has_zo else width/2
     for i, row in results_df.iterrows():
         gain = f"+{row['Delta_R2']:.3f}\n(+{row['Pct_Improvement']}%)"
-        ax.text(i + width/2, row['R2_With_DVA'] + 0.015, gain, ha='center', va='bottom', fontsize=10, fontweight='bold', color='#1d3557')
+        ax.text(i + offset, row['R2_With_DVA'] + 0.008, gain, ha='center', va='bottom', fontsize=9.5, fontweight='bold', color='#1d3557')
         
     plt.tight_layout()
     os.makedirs(os.path.dirname(save_path), exist_ok=True)

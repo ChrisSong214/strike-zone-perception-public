@@ -58,6 +58,9 @@ def load_all_swing_ratings(min_pitches=300):
     all_df = all_df.sort_values('n_pitches', ascending=False)
     all_df = all_df.drop_duplicates(subset=['batter_id', 'season']).reset_index(drop=True)
     
+    if 'zone_swing_rate' in all_df.columns and 'chase_rate' in all_df.columns:
+        all_df['z_minus_o'] = all_df['zone_swing_rate'] - all_df['chase_rate']
+        
     if min_pitches > 0:
         all_df = all_df[all_df['n_pitches'] >= min_pitches].reset_index(drop=True)
         
