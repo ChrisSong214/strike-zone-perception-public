@@ -25,10 +25,10 @@ Filtering out low-sample bench players and injury-shortened seasons dramatically
 | **$\ge 1,500$** | $\sim 394$ | 580 | **0.8346 (0.697)** | 0.6829 (0.466) | 0.6250 (0.391) | +0.0163 | +7.7% | 12.15 | $p = 0.00053$ |
 
 > **Slide Recommendation / Key Insight:**
-> 1. **DVA Completely Dominates Z-O Swing%:** While analysts often cite Z-O Swing% (Zone Swing minus Chase Rate) as a single-number plate discipline proxy, it has significantly weaker persistence ($r \approx 0.60 - 0.63, R^2 \approx 39\%$). DVA explains **66.2% to 69.7% of next-season variance — an extra +27 to +30 percentage points of explained true-talent stickiness**.
-> 2. **Why Z-O Swing% Underperforms Mathematically:** Hitters with aggressive approaches tend to swing more at both Zone AND Out-of-Zone pitches (positive covariance). Taking the difference $\text{Var}(Z - O) = \text{Var}(Z) + \text{Var}(O) - 2\text{Cov}(Z, O)$ subtracts away the batter's true stylistic signal while compounding measurement noise from umpire edge variance. DVA solves this by modeling flight uncertainty and point-of-decision value directly.
-> 3. **Chase Rate Plateaus and Decays:** Traditional Chase Rate peaks at $r = 0.721$ and drops to $r = 0.683$ among qualified regulars.
-> 4. **Triple the Predictive Lift on Future wOBA:** For regular starting hitters ($\ge 1,200$ pitches / $\approx 315$ PA), adding DVA to prior wOBA and Chase Rate yields an **+8.1% improvement in predictive power ($\Delta R^2 = +0.0180$, $F = 18.12, p = 2.3 \times 10^{-5}$)**.
+> 1. **DVA Year-over-Year Persistence vs. Z-O Swing%:** While analysts often cite Z-O Swing% (Zone Swing minus Chase Rate) as a single-number plate discipline proxy, it exhibits lower persistence ($r \approx 0.60 - 0.63, R^2 \approx 39\%$). Historical alignment DVA explains **66.2% to 69.7% of next-season variance ($R^2 \approx 0.66 - 0.70$)**, capturing substantial true-talent stickiness.
+> 2. **Why Z-O Swing% Underperforms Mathematically:** Hitters with aggressive approaches tend to swing more at both Zone AND Out-of-Zone pitches (positive covariance). Taking the difference $\text{Var}(Z - O) = \text{Var}(Z) + \text{Var}(O) - 2\text{Cov}(Z, O)$ subtracts away the batter's true stylistic signal while compounding measurement noise from umpire edge variance. DVA models flight uncertainty and point-of-decision value directly.
+> 3. **Chase Rate Stability:** Traditional Chase Rate stabilizes strongly among qualified regulars ($r \approx 0.68 - 0.72$).
+> 4. **Observed Association with Future wOBA:** For regular starting hitters ($\ge 1,200$ pitches / $\approx 315$ PA), adding historical alignment DVA to prior wOBA and Chase Rate yields an observed +8.1% improvement in in-sample predictive fit ($\Delta R^2 = +0.0180$, $F = 18.12, p = 2.3 \times 10^{-5}$).
 
 ---
 
@@ -45,33 +45,39 @@ Across $N = 1,247$ qualified consecutive regular-season batter pairs (2020 $\to$
 | **Z-O Swing% (Zone Swing - Chase)** | 1,247 | 0.6284 | 0.3949 | 0.6367 | $p = 5.5 \times 10^{-138}$ |
 | **Offensive wOBA** | 1,247 | 0.4060 | 0.1648 | 0.3675 | $p = 1.1 \times 10^{-50}$ |
 
-> **Presentation Punchline:** *At the qualified starter threshold ($\ge 750$ pitches), DVA explains **66.2% of next-season decision variance ($R^2 = 0.662$)**, beating traditional Chase Rate (51.7%) by **14.5 percentage points** and Z-O Swing% (39.5%) by **26.7 percentage points of explained variance**.*
+> **Presentation Takeaway:** *At the qualified starter threshold ($\ge 750$ pitches), historical strike-alignment DVA explains **66.2% of next-season decision variance ($R^2 = 0.662$)**, compared to 51.7% for traditional Chase Rate and 39.5% for Z-O Swing%, reflecting high true-talent consistency across seasons.*
 
 ---
 
 ### 3. Predictive Validity: Forecasting Future Performance ($N \to N+1$, $\ge 750$ Pitches)
-Out-of-sample regressions evaluated using 5-fold `GroupKFold` grouped strictly by `batter_id` (preventing player-specific fixed effect leakage across consecutive seasons) and reporting uncensored $\Delta R^2$:
+Out-of-sample regressions evaluated using 5-fold `GroupKFold` grouped strictly by `batter_id` (preventing player-specific fixed effect leakage across consecutive seasons) and reporting uncensored $\Delta R^2$ from the empirical summary (`predictive_power_summary.csv`):
 
 | Forecast Target | Baseline (Chase) $R^2$ | Baseline (Z-O Swing%) $R^2$ | Extended (+ DVA) $R^2$ | Uncensored $\Delta R^2$ | % Gain | In-Sample Nested $F$ | In-Sample $p$-value | Out-of-Sample Bootstrap 95% CI |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Next-Year wOBA ($\text{wOBA}_{N+1}$)** | **0.1670** | **0.1749** | **0.1761** | **+0.0091** | **+5.5%** | **13.74** | **$p = 0.000219$** | **[+0.0035, +0.0152] ($p < 0.001$)** |
-| **Next-Year Walk Rate ($\text{BB\%}_{N+1}$)** | 0.0405 | 0.0334 | 0.0437 | +0.0032 | +8.0% | 4.19 | $p = 0.0410$ | [+0.0002, +0.0071] ($p = 0.038$) |
-| **Next-Year Strikeout Rate ($\text{K\%}_{N+1}$)** | 0.0700 | 0.0700 | 0.0705 | +0.0006 | +0.8% | 0.78 | $p = 0.378$ | [-0.0009, +0.0024] ($p = 0.354$) |
+| **Next-Year wOBA ($\text{wOBA}_{N+1}$)** | **0.1610** | **0.1716** | **0.1682** | **+0.0072** | **+4.4%** | **13.74** | **$p = 0.000219$** | **[-0.0025, +0.0168] ($p = 0.096$)** |
+| **Next-Year Walk Rate ($\text{BB\%}_{N+1}$)** | 0.0377 | 0.0307 | 0.0406 | +0.0029 | +7.8% | 4.19 | $p = 0.0410$ | [-0.0023, +0.0078] ($p = 0.150$) |
+| **Next-Year Strikeout Rate ($\text{K\%}_{N+1}$)** | 0.0666 | 0.0673 | 0.0669 | +0.0003 | +0.4% | 0.78 | $p = 0.378$ | [-0.0016, +0.0022] ($p = 0.434$) |
 
-> **Methodological Rigor Highlights:**
-> 1. **GroupKFold Integrity:** Rather than random pooling that leaks player fixed effects across multi-year pairs ($2020\to2021, \dots, 2024\to2025$), grouping by `batter_id` ensures held-out validation evaluates true out-of-sample player generalization.
-> 2. **Uncensored Metrics:** Negative changes are never clamped to zero; raw $\Delta R^2 = R^2_{\text{full}} - R^2_{\text{base}}$ is reported transparently.
-> 3. **Hypothesis Testing Separation:** Classical $F$-tests are reported as in-sample nested OLS model evaluations, whereas out-of-sample predictive improvement is validated with 1,000 batter-clustered bootstrap resamples and rolling chronological evaluations.
+> **Forecasting Headline Takeaway:**
+> Forecasting shows a small observed gain: **$\Delta R^2 = +0.0072$**, with **$95\%$ bootstrap CI $[-0.0025, +0.0168]$ ($p = 0.096$)**. That supports **promising but uncertain additional predictive value**, rather than an established definitive improvement over traditional chase rate alone. DVA contributes modest out-of-sample variance explanation, motivating further validation on larger multi-year splits.
 
 ---
 
-### 4. Sample Size Stabilization Rate (Production EV-DVA & Alignment DVA)
-Using odd/even pitch split-half reliability with full production Empirical Bayes shrinkage ($K^* = \sigma^2_w / \tau^2_b$) across sample sizes from 50 to 1,000 pitches:
-* **200 Pitches:** $r = 0.517$ (Moderate signal)
-* **500 Pitches:** $r = 0.629$ (Strong signal)
-* **750 Pitches:** $r = 0.706$ (**Crosses the standard $r = 0.70$ sabermetric stabilization threshold**)
-* **1,000 Pitches:** $r = 0.755$
-*(Note: Evaluated on the exact production EV-DVA and Alignment DVA metrics rather than simplified proxies, verifying that the published Bayesian ratings stabilize rapidly.)*
+### 4. Sample Size Stabilization Rate (Empirical Bayes Split-Half Reliability)
+Using odd/even pitch split-half reliability with full production Empirical Bayes shrinkage ($K^* = \sigma^2_w / \tau^2_b$) across sample sizes from 50 to 1,000 pitches (`stabilization_summary.csv`):
+
+| Pitches Seen | Production DVA Split-Half $r$ | Alignment DVA Split-Half $r$ | Traditional Chase Rate Split-Half $r$ |
+| :---: | :---: | :---: | :---: |
+| **50** | 0.2731 | 0.1731 | 0.4402 |
+| **100** | 0.3925 | 0.3128 | 0.4864 |
+| **200** | 0.5400 | 0.5398 | 0.6858 |
+| **300** | 0.5777 | 0.6079 | 0.7401 |
+| **500** | 0.6857 | 0.6946 | 0.8126 |
+| **750** | 0.7811 | 0.7677 | 0.8554 |
+| **1,000** | 0.8397 | 0.8192 | 0.8855 |
+
+> **Repeatability Takeaway:**
+> Repeatability steadily improves with sample size (rising from $r = 0.273$ at 50 pitches to $r = 0.840$ at 1,000 pitches, crossing the conventional $r = 0.70$ threshold around 500–750 pitches). However, **traditional Chase Rate is more repeatable across all sample sizes in this direct comparison ($r = 0.440 \to 0.886$)**, reflecting the higher binomial variance inherent in continuous decision-value modeling. We avoid claiming that "DVA dominates traditional metrics" in raw stability; instead, DVA measures decision value under trajectory uncertainty beyond binary chase.
 
 ---
 
@@ -156,9 +162,9 @@ Top MLB pitchers who induce the most negative DVA in opposing hitters (causing t
 
 ---
 
-### 7. Sensitivity to Visual Uncertainty: The MDN Covariance Matrix ($\det \mathbf{\Sigma}_{0.40}$)
+### 7. Sensitivity to Trajectory-Model Forecast Uncertainty: The MDN Covariance Matrix ($\det \mathbf{\Sigma}_{0.40}$)
 
-Rather than treating model uncertainty as an unobserved nuisance parameter, the LSTM+MDN explicitly outputs the full bivariate spatial covariance matrix at the early-flight decision point ($t = 0.40$):
+Rather than treating model uncertainty as an unobserved nuisance parameter, the LSTM+MDN explicitly outputs the full bivariate spatial covariance matrix at the early-flight decision point ($t = 0.40$), quantifying **trajectory-model forecast uncertainty**:
 $$\mathbf{\Sigma}_{0.40} = \begin{pmatrix} \sigma_x^2 & \rho \sigma_x \sigma_z \\ \rho \sigma_x \sigma_z & \sigma_z^2 \end{pmatrix}$$
 
 The **Uncertainty Volume** represents the area of the 1-standard-deviation confidence ellipse:
@@ -168,53 +174,48 @@ $$\text{Vol}(\mathbf{\Sigma}_{0.40}) = \pi \sqrt{\det \mathbf{\Sigma}_{0.40}} = 
 To ensure that spatial uncertainty is not merely acting as a proxy for distance to the strike-zone edge:
 1. **Euclidean Edge Distance ($d_{\text{edge}}$):** Exact geometric distance from predicted mean location $(\mu_x, \mu_z)$ to the nearest strike-zone rectangle boundary.
 2. **Boundary-Orthogonal Standard Deviation ($\sigma_{\perp}$):** Directional standard deviation along the axis perpendicular to the nearest edge ($\sigma_x$ for side edges, $\sigma_z$ for top/bottom edges).
-3. **Out-of-Sample Log-Likelihood Test:** Adding $\log \text{Vol}(\mathbf{\Sigma}_{0.40})$ and $\sigma_{\perp}$ to a baseline controlling for count-conditioned league swing logits, early strike probability $P(\text{Strike})$, and Euclidean edge distance yields a statistically significant out-of-sample log-likelihood improvement across 5-fold cross-validation ($\Delta \text{LL} > 0, p < 0.001$), proving that spatial uncertainty drives batter choices beyond simple boundary distance.
+3. **Out-of-Sample Log-Likelihood Test:** Adding $\log \text{Vol}(\mathbf{\Sigma}_{0.40})$ and $\sigma_{\perp}$ to a baseline controlling for count-conditioned league swing logits, early strike probability $P(\text{Strike})$, and Euclidean edge distance yields a statistically significant out-of-sample log-likelihood improvement across 5-fold cross-validation ($\Delta \text{LL} > 0, p < 0.001$), demonstrating that trajectory forecast uncertainty captures additional structure in batter choices beyond boundary distance.
 
 On borderline pitches ($0.30 \le P(\text{Strike}) \le 0.70$), we estimate each batter's **Ambiguity Policy Parameter ($\beta_{U,i}$)**:
 $$\text{logit } P(\text{Swing}_i) = \alpha_i + \beta_{P,i}(P - 0.50) + \beta_{U,i} \ln\left(\frac{\text{Vol}_i}{\text{Vol}_{\text{league}}}\right) + \beta_{\text{edge}} d_{\text{edge}} + \beta_{\perp} \sigma_{\perp}$$
 
 #### 🎯 Strategic Archetypes: Ambiguity-Seeking vs. Ambiguity-Averse
-Across 353 qualified hitters in 2025:
+Across 357 qualified hitters in 2025 (controlling for edge distance and boundary orientation):
 
-* **Ambiguity-Seeking ($\beta_{U,i} > 0$, "When in Doubt, Swing"):** Hitters who expand their swing aggression under visual uncertainty to protect the plate:
-  1. **Tyler Stephenson:** $\beta_U = +1.98$ ($p < 0.001$, Rank #1 Ambiguity-Seeking)
-  2. **Tyler Soderstrom:** $\beta_U = +1.77$ ($p < 0.001$)
-  3. **Luis García:** $\beta_U = +1.57$ ($p < 0.001$)
-  4. **Lars Nootbaar:** $\beta_U = +1.37$ ($p < 0.001$)
-  5. **Bryan Reynolds:** $\beta_U = +1.28$ ($p < 0.001$)
+* **Ambiguity-Seeking ($\beta_{U,i} > 0$, "When in Doubt, Swing"):** Hitters who expand swing aggression under high trajectory forecast uncertainty:
+  1. **Luis García:** $\beta_U = +1.44 \pm 0.49$
+  2. **Travis D'Arnaud:** $\beta_U = +1.20 \pm 0.52$
+  3. **Andrés Giménez:** $\beta_U = +1.19 \pm 0.50$
+  4. **Tyler Soderstrom:** $\beta_U = +1.19 \pm 0.45$
+  5. **Nick Fortes:** $\beta_U = +1.15 \pm 0.56$
 
-* **Ambiguity-Averse ($\beta_{U,i} < 0$, "When in Doubt, Take"):** Hitters who refuse to offer unless trajectory confidence is exceptionally clear:
-  1. **Mike Trout:** $\beta_U = -2.10$ ($p < 0.001$, Rank #1 Ambiguity-Averse in MLB)
-  2. **Ronald Acuña Jr.:** $\beta_U = -2.06$ ($p < 0.001$)
-  3. **Blaze Alexander:** $\beta_U = -1.52$ ($p < 0.001$)
-  4. **Ryan McMahon:** $\beta_U = -1.37$ ($p < 0.001$)
-  5. **Trent Grisham:** $\beta_U = -1.30$ ($p < 0.001$)
-  6. **Marcell Ozuna:** $\beta_U = -1.19$ ($p < 0.001$)
+* **Ambiguity-Averse ($\beta_{U,i} < 0$, "When in Doubt, Take"):** Hitters who take borderline pitches when trajectory forecast uncertainty expands:
+  1. **Eugenio Suárez:** $\beta_U = -1.44 \pm 0.40$
+  2. **Rafael Devers:** $\beta_U = -1.42 \pm 0.38$
+  3. **Blaze Alexander:** $\beta_U = -1.38 \pm 0.56$
+  4. **Alex Call:** $\beta_U = -1.25 \pm 0.50$
+  5. **Dillon Dingler:** $\beta_U = -1.20 \pm 0.45$
 
-> **Dodgers Advance Scouting Application:** Pitchers attacking Mike Trout or Ronald Acuña Jr. should throw high-uncertainty pitches (high movement variance) on borderline counts, as they reliably freeze and take. Conversely, attacking Tyler Stephenson or Luis García with ambiguous movement induces out-of-zone emergency swings.
+> **Scouting Application:** When facing ambiguity-averse hitters (e.g. Rafael Devers, Eugenio Suárez), high-forecast-uncertainty pitches along the edge reliably induce takes. Conversely, facing ambiguity-seeking hitters (e.g. Luis García, Tyler Soderstrom) with ambiguous movement prompts out-of-zone emergency swings.
 
 ---
 
-### 8. Inferring Individual Information-Use Horizons ($\tau^*_i$) & Statcast Bat-Tracking Validation
+### 8. Inferring Individual Information-Use Horizons ($\tau^*_i$) & Statcast Bat-Tracking Evaluation
 
-Instead of assuming every MLB hitter commits to a swing at a static 40% flight, we infer each batter's unique **Information-Use Horizon ($\tau^*_i \in [0.25, 0.55]$)** using a smooth cumulative **Information Center of Mass**:
+Instead of assuming every MLB hitter commits to a swing at a static 40% flight, we infer each batter's unique **Information-Use Horizon ($\tau^*_i \in [0.25, 0.55]$)** using a smooth cumulative **Information Center of Mass**, treating $\tau^*_i$ as an **exploratory fitted index**:
 $$\tau^*_i = \frac{\sum_{k=1}^K \bar{\tau}_k \cdot \max(w_{ik}, 0)}{\sum_{k=1}^K \max(w_{ik}, 0)}$$
 where $w_{ik}$ are the non-negative ridge regression weights on sequential trajectory updates $\Delta P_{\tau_{k-1} \to \tau_k}$, and $\text{SE}(\tau^*_i)$ is computed in closed form via the delta method.
 
 #### ⏱️ Population Inferred Information-Use Distribution (421 Qualified Hitters in 2025)
-* **$\tau^* \in [0.25, 0.32]$ ($100\text{--}130\text{ ms}$ after release):** $110$ hitters ($26.1\%$) — Early Information Cutoff
-* **$\tau^* \in (0.32, 0.42]$ ($130\text{--}170\text{ ms}$ after release):** $137$ hitters ($32.5\%$) — League-Median Decision Window
-* **$\tau^* \in (0.42, 0.55]$ ($170\text{--}220\text{ ms}$ after release):** $174$ hitters ($41.3\%$) — Deep Trajectory Trackers
+* **$\tau^* \le 0.32$ ($\le 130\text{ ms}$ after release):** $8$ hitters ($1.9\%$) — Early Information Cutoff
+* **$0.32 < \tau^* \le 0.42$ ($130\text{--}170\text{ ms}$ after release):** $351$ hitters ($83.4\%$) — League-Median Decision Window
+* **$\tau^* > 0.42$ ($> 170\text{ ms}$ after release):** $62$ hitters ($14.7\%$) — Deep Trajectory Trackers
+* **Population Summary:** Mean $\tau^* = 0.394$ ($158\text{ ms}$), Median $\tau^* = 0.393$ ($157\text{ ms}$), Standard Deviation $= 0.032$, Mean $\text{SE} = 0.054$.
 
-#### ⚾ Biomechanical Grounding: Independent Statcast Bat-Tracking Validation
-Framing bat tracking as an **independent external biomechanical validation** confirms that physical swing mechanics strongly constrain the cognitive information horizon:
-* **Giancarlo Stanton ($\tau^* = 0.30 \pm 0.04$, $120\text{ ms}$):** Massive rotational inertia ($79.0\text{ mph}$ bat speed, $8.72\text{ ft}$ swing length). Stanton's long acceleration arc requires an earlier information cutoff.
-* **Mookie Betts ($\tau^* = 0.28 \pm 0.03$, $110\text{ ms}$):** Ultra-fast read-and-commit profile ($66.7\text{ mph}$ bat speed, $6.95\text{ ft}$ swing length).
-* **Steven Kwan ($\tau^* = 0.35 \pm 0.03$, $140\text{ ms}$):** Extremely compact stroke ($61.5\text{ mph}$ bat speed, $6.17\text{ ft}$ swing length).
-* **Shohei Ohtani ($\tau^* = 0.40 \pm 0.03$, $160\text{ ms}$):** Balanced decision point ($74.1\text{ mph}$ bat speed, $7.90\text{ ft}$ swing length).
-* **Aaron Judge ($\tau^* = 0.44 \pm 0.03$, $175\text{ ms}$):** Elite pitch tracking capability ($74.8\text{ mph}$ bat speed, $8.04\text{ ft}$ swing length).
-* **Juan Soto ($\tau^* = 0.46 \pm 0.03$, $185\text{ ms}$):** Deep, patient vision allowing late pitch resolution ($71.0\text{ mph}$ bat speed, $6.97\text{ ft}$ swing length).
-* **Freddie Freeman ($\tau^* = 0.49 \pm 0.03$, $195\text{ ms}$):** Short, inside-out stroke ($68.4\text{ mph}$ bat speed, $6.81\text{ ft}$ swing length) allowing him to utilize trajectory information deeper than $90\%$ of MLB hitters.
+#### ⚾ Statcast Bat-Tracking Empirical Evaluation
+Evaluating inferred horizons against Statcast bat tracking reveals essentially no linear association between information horizons and physical swing mechanics ($r = -0.018, p = 0.71$ for bat speed; $r = 0.000, p = 0.99$ for swing length across 347 matched hitters).
+
+We remove any claim of biomechanical confirmation: these null correlations demonstrate that $\tau^*$ is not simply tracking gross bat-tracking kinematics (longer or faster swings requiring earlier commits), but null correlations also do not establish a cognitive mechanism. Instead, $\tau^*_i$ should be understood strictly as an exploratory fitted index of empirical information accumulation timing.
 
 ---
 
@@ -258,5 +259,11 @@ All figures and tables have been rendered in [`assets/presentation/`](../../asse
 7. **[`pitcher_deception.png`](../../assets/presentation/pitcher_deception.png)**: Graphic table of the top deceptive pitchers inducing batter errors.
 8. **[`mirage_orthogonality_quadrant.png`](../../assets/presentation/mirage_orthogonality_quadrant.png)**: 2D scatter plot of Transparent Chase Rate vs. Tunnel Chase Residual with key player annotations.
 9. **[`uncertainty_response_curves.png`](../../assets/presentation/uncertainty_response_curves.png)**: Psychometric response curves showing individual batter swing probability shifts under visual uncertainty ($\det \mathbf{\Sigma}_{0.40}$ & $\sigma_{\perp}$).
-10. **[`commit_horizon_bat_tracking.png`](../../assets/presentation/commit_horizon_bat_tracking.png)**: Dual-panel plot showing the population distribution of individual Information-Use Horizons $\tau^*_i$ and biomechanical validation against Statcast bat speed and swing length.
+10. **[`commit_horizon_bat_tracking.png`](../../assets/presentation/commit_horizon_bat_tracking.png)**: Dual-panel plot showing the population distribution of individual Information-Use Horizons $\tau^*_i$ and exploratory kinematic comparison against Statcast bat speed and swing length.
 11. **[`full_pipeline_holdout_audit.csv`](../../assets/presentation/full_pipeline_holdout_audit.csv)**: Summary table of temporal split calibration, group holdout generalization, downstream EV-DVA stability, and kinematic sensitivity.
+
+---
+
+## 🎯 Defensible Research Takeaway
+
+A defensible takeaway is: **the framework offers an interpretable way to evaluate decisions under trajectory uncertainty, shows repeatable player variation, and motivates further validation of predictive and behavioral extensions.**

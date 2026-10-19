@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![XGBoost](https://img.shields.io/badge/XGBoost-1.7+-green.svg)](https://xgboost.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-49%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-81%20passed-brightgreen.svg)]()
 
 > **Research and presentation by Chris Song** presented at the **SABR / SAGB Conference**.  
 > Materials and slides available in [`docs/presentation/`](docs/presentation/).  
@@ -30,10 +30,10 @@ This repository establishes **a probabilistic framework for evaluating MLB swing
    - **Objective Post-Hoc Baseline (`FINAL_LOCATION_FEATURES`):** Conditioned on where the pitch actually arrived at home plate (`plate_x, plate_z, in_zone, dist_from_center`).
    - **Perceptual Decision-Time Baseline (`DECISION_TIME_FEATURES`):** Conditioned exclusively on early-trajectory information available to the batter at $t=0.40$ (`lstm_p_strike, mu_x, mu_z, sigma_x, sigma_z, rho, pitch_type, release_speed`).
    - *Deception Metric:* The divergence $\hat{p}_{\text{swing}}(\text{Perceptual}) - \hat{p}_{\text{swing}}(\text{Post-Hoc})$ directly quantifies how much early ball flight induces swings beyond where the pitch actually arrived.
-4. **Count-Dependent Expected Value DVA (`EV-DVA`) & Empirical Bayes Shrinkage:** Evaluates **Expected Value Decision Value Added (EV-DVA)** using empirical RE24 count-transition values across all 12 count states and data-driven Empirical Bayes shrinkage ($K^* = \sigma^2_w / \tau^2_b$), while retaining strike-alignment DVA for zone-accuracy benchmarking.
+4. **Count-Dependent Expected Value DVA (`EV-DVA`) & Empirical Bayes Shrinkage:** Evaluates **Expected Value Decision Value Added (EV-DVA)** as **estimated value under the chosen utility assumptions** (empirical RE24 count-transition run values and out-of-fold baseline models), shrunk via data-driven Empirical Bayes ($K^* = \sigma^2_w / \tau^2_b$). Historical strike-alignment DVA (2020–2024) is retained alongside for direct zone-accuracy benchmarking.
 
 > [!NOTE]
-> **Scientific Modeling Framing:** Trajectories are reconstructed from Statcast initial conditions to model the normative physical upper bound of strike-location information available from the pitch flight ($P(\text{Strike} \mid \mathcal{F}_{0.40})$). This serves as an objective **Trajectory-Based Perceptual Proxy** rather than a claim of noiseless internal biological cognition. The downstream decision engine conditions on count-specific run expectancies and out-of-fold league baselines to evaluate decision value cleanly.
+> **Scientific Modeling Framing & Core Takeaway:** Trajectories are reconstructed from Statcast initial conditions to model the normative physical upper bound of strike-location information available from early pitch flight ($P(\text{Strike} \mid \mathcal{F}_{0.40})$). Uncertainty is evaluated strictly as **trajectory-model forecast uncertainty** rather than biological sensory noise. Inferred horizons $\tau^*_i$ represent **exploratory fitted indices** of empirical information-use timing, and EV-DVA represents **estimated value under the chosen utility assumptions**. Overall, **the framework offers an interpretable way to evaluate decisions under trajectory uncertainty, shows repeatable player variation, and motivates further validation of predictive and behavioral extensions.**
 
 ---
 
@@ -62,16 +62,14 @@ The repository contains three complementary modeling approaches:
 - **Model Architecture:** [`PitchPerceptionLSTM`](src/model.py) with 2-layer LSTM + Bivariate Gaussian Probabilistic Output Head ($K=1$ MDN) predicting $(\mu_x, \mu_z, \sigma_x, \sigma_z, \rho)$.
 - **Scoring Engine:** [`LSTMEyeScorer`](src/lstm_scoring.py) computes $P(\text{Strike})$ at standardized 40% flight (`decision_frac = 0.40`) using bivariate normal integration (`_bvn_cdf`).
 - **Baseline Engine:** [`LeagueSwingModel`](src/swing_model.py) trained with untouched 5-fold batter-grouped out-of-fold cross-validation (`GroupKFold`) supporting both `final_location` and `decision_time` baselines.
-- **Metric Formulation:**
-  $$\text{DVA} = \text{Tendency DVA} + \text{Actual DVA}$$
+- **Metric Formulation:** $\text{DVA} = \text{Tendency DVA} + \text{Actual DVA}$
   - $\text{Tendency DVA}$: True-talent posterior swing tendency deviation from league prior via Beta-Binomial conjugacy.
   - $\text{Actual DVA}$: Observed swing decision value relative to baseline expectation, shrunk toward zero via empirical Bayes prior ($K = 15.0$).
   - $\text{EV-DVA}$: Count-dependent run expectancy value added relative to count transition baselines.
 
 ### Track 2: Classical Additive Physical Eye Scorer
 - **Module:** [`FastEyeScorer`](src/scoring.py)
-- **Mechanism:** Vectorized maximum-likelihood estimation (MLE) over swing decisions assuming an additive variance model:
-  $$\text{Var}_{\text{total}} = \text{Var}_{\text{phys}} + \sigma_{\text{vis}}^2$$
+- **Mechanism:** Vectorized maximum-likelihood estimation (MLE) over swing decisions assuming an additive variance model: $\text{Var}_{\text{total}} = \text{Var}_{\text{phys}} + \sigma_{\text{vis}}^2$
 
 ### Track 3: Biophysical Monte Carlo & Bayesian Fusion
 - **Modules:** [`generate_pitch_cloud`](src/uncertainty.py) & [`PerceptualCloud`](src/perception.py)
@@ -100,12 +98,21 @@ python3 analysis/compare_stowers_kwan_40.py --year 2025
 
 This repository includes four cutting-edge perceptual modeling extensions designed to evaluate late movement, biological uncertainty, individual decision timing, and full-pipeline holdout validity:
 
-### 1. Deception vs. Discipline: The Perceptual Mirage Decomposition ($\Delta P$)
+### 1. Deception vs. Discipline: The Perceptual Mirage Decomposition (ΔP)
+
 Compares the streaming LSTM early strike belief ($t = 0.40$, ~175 ms) against ground-truth plate arrival ($t = 1.0$), separating true trajectory deception from ordinary binomial calibration variance:
-$$\Delta P_i = P(\text{Strike} \mid \mathcal{F}_{0.40})_i - \mathbb{I}(\text{True Strike})_i$$
+
+$$
+\Delta P_i = P(\text{Strike} \mid \mathcal{F}_{0.40})_i - \mathbf{1}(\text{True Strike})_i
+$$
+
 - **True Perceptual Reversals vs. Prediction Discrepancies:** Strictly separates meaningful perceptual reversals (pitches crossing the $0.50$ decision threshold: $P_{0.40} \ge 0.50$ on true balls for tunnel chases, $P_{0.40} \le 0.50$ on true strikes for frozen takes) from general prediction discrepancies ($|\Delta P| \ge 0.08$). A ball with $P=0.10$ is never misclassified as a tunnel reversal.
 - **Continuous Deception-Weighted Chase OE:** Evaluates chase over expected continuously across all out-of-zone pitches weighted by early strike belief:
-  $$\text{Deceptive Chase OE}_i = \frac{\sum_{j \in \text{Balls}} P(\text{Strike})_{0.40, j} \cdot (\text{Swing}_{ij} - \hat{p}_{\text{league}, ij})}{\sum_{j \in \text{Balls}} P(\text{Strike})_{0.40, j}}$$
+
+$$
+\text{Deceptive Chase OE}_i = \frac{\sum_{j \in \text{Balls}} P(\text{Strike})_{0.40, j} \cdot (\text{Swing}_{ij} - \hat{p}_{\text{league}, ij})}{\sum_{j \in \text{Balls}} P(\text{Strike})_{0.40, j}}
+$$
+
   This eliminates arbitrary thresholding while giving near-zero weight to non-competitive pitches.
 - **Unexplained Linear Variation:** Traditional plate discipline metrics (Z-Swing% and Chase%) explain only 13.5% of the linear variation ($R^2 = 0.135$, non-linear GBDT $R^2 = 0.152$), leaving 86.5% of unexplained linear variation between baseline discipline and pitch tunneling vulnerability.
 - **Trajectory Belief Reversal ($\text{belief\_shift}$):** Quantifies dynamic mid-flight belief shifts $P(\text{Strike})_{0.30} - P(\text{Strike})_{0.55}$, distinguishing late trajectory breaks from static boundary uncertainty.
@@ -119,9 +126,14 @@ $$\Delta P_i = P(\text{Strike} \mid \mathcal{F}_{0.40})_i - \mathbb{I}(\text{Tru
 python3 scripts/run_mirage_decomposition.py --years 2025 --mirage-thresh 0.08
 ```
 
-### 2. Sensitivity to Visual Uncertainty: The MDN Covariance Matrix ($\det \mathbf{\Sigma}_{0.40}$)
-Leverages the full bivariate spatial covariance matrix output by the Mixture Density Network:
-$$\mathbf{\Sigma}_{0.40} = \begin{pmatrix} \sigma_x^2 & \rho \sigma_x \sigma_z \\ \rho \sigma_x \sigma_z & \sigma_z^2 \end{pmatrix}, \quad \text{Vol}(\mathbf{\Sigma}_{0.40}) = \pi \sqrt{\det \mathbf{\Sigma}_{0.40}} = \pi \sigma_x \sigma_z \sqrt{1 - \rho^2}$$
+### 2. Sensitivity to Trajectory Forecast Uncertainty: The MDN Covariance Matrix (det Σ_0.40)
+
+Leverages the full bivariate spatial covariance matrix output by the Mixture Density Network to evaluate batter choices under **trajectory-model forecast uncertainty**:
+
+$$
+\mathbf{\Sigma}_{0.40} = \begin{pmatrix} \sigma_x^2 & \rho \sigma_x \sigma_z \\ \rho \sigma_x \sigma_z & \sigma_z^2 \end{pmatrix}, \quad \text{Vol}(\mathbf{\Sigma}_{0.40}) = \pi \sqrt{\det \mathbf{\Sigma}_{0.40}} = \pi \sigma_x \sigma_z \sqrt{1 - \rho^2}
+$$
+
 - **Boundary-Orthogonal Uncertainty Controls:** In addition to total covariance volume, computes Euclidean distance to the nearest zone boundary ($d_{\text{edge}}$) and directional standard deviation perpendicular to the boundary ($\sigma_{\perp}$).
 - **Out-of-Sample Predictive Power:** 5-fold cross-validation demonstrates that covariance volume and boundary-orthogonal uncertainty yield statistically significant out-of-sample log-likelihood improvements over models controlling solely for $P(\text{Strike})$ and edge distance.
 - **Strategic Policy Archetypes:** Identifies **Ambiguity-Seeking** hitters ("when in doubt, swing", e.g. Tyler Stephenson $\beta_U = +1.98$) vs. **Ambiguity-Averse** hitters ("when in doubt, take", e.g. Mike Trout $\beta_U = -2.10$, Ronald Acuña Jr. $\beta_U = -2.06$).
@@ -134,11 +146,15 @@ $$\mathbf{\Sigma}_{0.40} = \begin{pmatrix} \sigma_x^2 & \rho \sigma_x \sigma_z \
 python3 scripts/run_uncertainty_sensitivity.py --year 2025
 ```
 
-### 3. Inferring Individual Information-Use Horizons ($\tau^*_i$) & Statcast Bat Tracking
+### 3. Inferring Individual Information-Use Horizons (τ*) & Statcast Bat-Tracking Evaluation
+
 Replaces static commitment point assumptions by inferring each batter's **Information-Use Horizon ($\tau^*_i$)** along the sequential trajectory using a smooth **Information Center of Mass**:
-$$\tau^*_i = \frac{\sum_{k=1}^K \bar{\tau}_k \cdot \max(w_{ik}, 0)}{\sum_{k=1}^K \max(w_{ik}, 0)}$$
-- **Smooth Functional Inference:** Replaces ad-hoc step-function cutoffs with a continuous Information Center of Mass equipped with closed-form delta-method asymptotic standard errors $\text{SE}(\tau^*_i)$.
-- **Independent Biomechanical Validation:** Correlating inferred horizons with Statcast bat tracking confirms that hitters with longer, higher-inertia swings (Giancarlo Stanton: $\tau^* = 0.30$, $79.0\text{ mph}$, $8.72\text{ ft}$) exhibit earlier information cutoffs, while compact hitters (Freddie Freeman: $\tau^* = 0.50$, $68.4\text{ mph}$, $6.81\text{ ft}$) utilize trajectory information deeper into flight.
+
+$$
+\tau^*_i = \frac{\sum_{k=1}^K \bar{\tau}_k \cdot \max(w_{ik}, 0)}{\sum_{k=1}^K \max(w_{ik}, 0)}
+$$
+- **Smooth Functional Inference:** Replaces ad-hoc step-function cutoffs with a continuous Information Center of Mass equipped with closed-form delta-method asymptotic standard errors $\text{SE}(\tau^*_i)$, treating $\tau^*_i$ as an **exploratory fitted index** of empirical information timing.
+- **Statcast Bat-Tracking Empirical Evaluation:** Evaluating against Statcast bat tracking reveals essentially no linear association between inferred horizons and swing mechanics ($r = -0.018, p = 0.71$ for bat speed; $r = 0.000, p = 0.99$ for swing length). While this demonstrates that $\tau^*$ does not simply track gross swing mechanics, null correlations also do not establish a cognitive mechanism; horizons should be interpreted strictly as exploratory fitted indices of information accumulation timing.
 
 <p align="center">
   <img src="assets/presentation/commit_horizon_bat_tracking.png" alt="Commit Horizon vs Bat Tracking" width="85%"/>
@@ -208,7 +224,7 @@ sp26_sagb_dj/
 │   ├── physics.py              # 9-parameter constant acceleration trajectory
 │   ├── uncertainty.py          # Monte Carlo release parameter perturbation
 │   └── scoring.py              # Classical FastEyeScorer MLE
-├── tests/                      # Automated test suite (49 tests in pytest)
+├── tests/                      # Automated test suite (81 tests in pytest)
 │   ├── test_mirage_decomposition.py     # Deception residual, belief shift, & split-half
 │   ├── test_uncertainty_sensitivity.py  # Ridge ambiguity policy, volume, & σ_perp
 │   ├── test_commit_horizon.py           # Information center of mass & delta method SE
@@ -217,6 +233,9 @@ sp26_sagb_dj/
 │   ├── test_lstm_scoring.py             # BVN CDF & strike zone integration
 │   ├── test_oof_provenance.py           # Strict out-of-fold leak guards
 │   ├── test_physics_boundaries.py       # Trajectory kinematics & physics
+│   ├── test_audit_cycle1.py             # Cycle 1 regression suite (EB NaN resilience, canonical bins, linear physics)
+│   ├── test_audit_cycle2.py             # Cycle 2 regression suite (Scalar returns, inverted zone, percentile NaN guards)
+│   ├── test_audit_cycle3.py             # Cycle 3 regression suite (rho=0 continuity, BVN bounds, tuple arity)
 │   └── test_scoring.py                  # Dual baselines, EV-DVA scoring, RE24 values, & ANOVA EB shrinkage
 ├── .gitignore                  # Production gitignore for large ML datasets
 ├── pyproject.toml              # Modern PEP 517/621 package build config
@@ -250,7 +269,7 @@ pip install -e .
 pytest tests/
 ```
 
-All 49 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, trajectory kinematics, FastEyeScorer filtering and minimum observation guards, strict out-of-fold provenance validation, perceptual mirage decompositions, visual uncertainty sensitivity, sequential commit horizon forward updates, canonical loader schema validation, and dual baseline scoring.
+All 81 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, trajectory kinematics, FastEyeScorer filtering and minimum observation guards, strict out-of-fold provenance validation, perceptual mirage decompositions, visual uncertainty sensitivity, sequential commit horizon forward updates, canonical loader schema validation, and dual baseline scoring.
 
 ### 3. Export the 2025 Leaderboard
 

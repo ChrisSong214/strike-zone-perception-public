@@ -200,6 +200,51 @@ LOCATION_BINS = ['zone', 'edge', 'chase']
 PITCH_GROUPS = ['fastball', 'breaking', 'offspeed']
 
 
+def sanitize_context_bins(df):
+    """
+    Sanitize and canonicalize context bin columns in DataFrame:
+    - 'count_group': maps 'neutral' -> 'even', 'two_strikes' -> 'behind', derives from balls/strikes if missing, defaults to 'even'.
+    - 'pitch_group': falls back to 'fastball' if missing or invalid.
+    - 'loc_bin': maps 'heart' -> 'zone', 'shadow' -> 'edge', 'waste' -> 'chase', derives from dist_from_center/in_zone if missing, defaults to 'zone'.
+    """
+    df = df.copy()
+    if 'count_group' not in df.columns:
+        b = df['balls'].values if 'balls' in df.columns else np.zeros(len(df), dtype=int)
+        s = df['strikes'].values if 'strikes' in df.columns else np.zeros(len(df), dtype=int)
+        cg = np.full(len(df), 'even', dtype=object)
+        cg[(b > s) & (s < 2)] = 'ahead'
+        cg[(s > b) | (s == 2)] = 'behind'
+        df['count_group'] = cg
+    else:
+        cg_series = df['count_group'].astype(str).replace({'neutral': 'even', 'two_strikes': 'behind'})
+        valid_cg = set(COUNT_GROUPS)
+        df['count_group'] = cg_series.map(lambda x: x if x in valid_cg else 'even')
+
+    if 'pitch_group' not in df.columns:
+        df['pitch_group'] = 'fastball'
+    else:
+        valid_pg = set(PITCH_GROUPS)
+        df['pitch_group'] = df['pitch_group'].astype(str).map(lambda x: x if x in valid_pg else 'fastball')
+
+    if 'loc_bin' not in df.columns:
+        if 'dist_from_center' in df.columns:
+            lb = np.full(len(df), 'chase', dtype=object)
+            dist = df['dist_from_center'].values
+            lb[dist <= 1.0] = 'zone'
+            lb[(dist > 1.0) & (dist <= 1.5)] = 'edge'
+            df['loc_bin'] = lb
+        elif 'in_zone' in df.columns:
+            df['loc_bin'] = np.where(df['in_zone'] == 1, 'zone', 'chase')
+        else:
+            df['loc_bin'] = 'zone'
+    else:
+        lb_series = df['loc_bin'].astype(str).replace({'heart': 'zone', 'shadow': 'edge', 'waste': 'chase'})
+        valid_lb = set(LOCATION_BINS)
+        df['loc_bin'] = lb_series.map(lambda x: x if x in valid_lb else 'zone')
+
+    return df
+
+
 class BayesianBatterModel:
     """
     Hierarchical Beta-Binomial model for individual batter swing tendencies.
@@ -233,7 +278,7 @@ class BayesianBatterModel:
             df: DataFrame with context bin columns and 'is_swing'
             league_p_swing: array of league-average P(Swing) per pitch (from XGBoost)
         """
-        df = df.copy()
+        df = sanitize_context_bins(df)
         df['league_p_swing'] = league_p_swing
         
         # Step 1: Compute league-level bin priors (average P(Swing) per bin)
@@ -422,32 +467,59 @@ def estimate_eb_shrinkage(df, residual_col='ev_dva', batter_col='batter', min_pi
     if batter_col not in df.columns or residual_col not in df.columns:
         return 50.0, 1.0, 0.02
         
-    counts = df[batter_col].value_counts()
-    valid_batters = counts[counts >= min_pitches_for_var].index
+    valid_mask = df[batter_col].notna() & df[residual_col].notna()
+    res_vals = pd.to_numeric(df[residual_col], errors='coerce')
+    valid_mask &= np.isfinite(res_vals)
+    clean_df = df[valid_mask].copy()
+    clean_df[residual_col] = res_vals[valid_mask]
+    
+    min_obs = max(int(min_pitches_for_var), 2)
+    counts = clean_df[batter_col].value_counts()
+    valid_batters = counts[counts >= min_obs].index
     if len(valid_batters) < 5:
         return 50.0, 1.0, 0.02
         
-    sub = df[df[batter_col].isin(valid_batters)]
+    sub = clean_df[clean_df[batter_col].isin(valid_batters)]
     grouped = sub.groupby(batter_col)[residual_col]
     n_i = grouped.count().values.astype(np.float64)
     mean_i = grouped.mean().values.astype(np.float64)
     var_i = grouped.var(ddof=1).fillna(0).values.astype(np.float64)
     
-    df_within = np.sum(n_i - 1.0)
-    if df_within <= 0:
+    mask_2 = n_i >= 2
+    if np.sum(mask_2) < 5:
+        return 50.0, 1.0, 0.02
+    n_i = n_i[mask_2]
+    mean_i = mean_i[mask_2]
+    var_i = var_i[mask_2]
+    
+    df_within = float(np.sum(n_i - 1.0))
+    if df_within <= 0 or not np.isfinite(df_within):
         return 50.0, 1.0, 0.02
         
-    ss_within = np.sum((n_i - 1.0) * var_i)
+    ss_within = float(np.sum((n_i - 1.0) * var_i))
+    if not np.isfinite(ss_within) or ss_within < 0:
+        return 50.0, 1.0, 0.02
     sigma2_within = float(ss_within / df_within)
+    if not np.isfinite(sigma2_within) or sigma2_within <= 0:
+        sigma2_within = 1.0
     
-    grand_mean = float(np.sum(n_i * mean_i) / np.sum(n_i))
+    sum_n = float(np.sum(n_i))
+    if sum_n <= 0:
+        return 50.0, 1.0, 0.02
+    grand_mean = float(np.sum(n_i * mean_i) / sum_n)
     k_groups = len(n_i)
     ss_between = float(np.sum(n_i * (mean_i - grand_mean)**2))
     ms_between = ss_between / max(k_groups - 1, 1)
     ms_within = sigma2_within
     
-    n_eff = float(np.sum(n_i) - np.sum(n_i**2) / np.sum(n_i)) / max(k_groups - 1, 1)
-    tau2_between = float(max(1e-6, (ms_between - ms_within) / max(n_eff, 1.0)))
+    denom_eff = max(k_groups - 1, 1)
+    n_eff = float(sum_n - np.sum(n_i**2) / sum_n) / denom_eff
+    
+    raw_tau2 = (ms_between - ms_within) / max(n_eff, 1.0)
+    if not np.isfinite(raw_tau2) or raw_tau2 < 1e-6:
+        tau2_between = 1e-6
+    else:
+        tau2_between = float(raw_tau2)
     
     k_shrinkage = float(np.clip(sigma2_within / tau2_between, 5.0, 500.0))
     return k_shrinkage, sigma2_within, tau2_between
@@ -497,25 +569,10 @@ def compute_dva(df, league_model, bayesian_model, league_model_perceptual=None):
     3. **Tendency DVA**:
        - Difference in expected quality between batter posterior swing tendency and league prior.
     """
-    df = df.copy()
+    df = sanitize_context_bins(df)
     
     # ---- Vectorised posterior lookup (replaces slow row-by-row .apply) ----
     posterior_lut = _build_posterior_lookup(bayesian_model)
-    
-    if 'count_group' not in df.columns:
-        b = df['balls'].values if 'balls' in df.columns else np.zeros(len(df), dtype=int)
-        s = df['strikes'].values if 'strikes' in df.columns else np.zeros(len(df), dtype=int)
-        cg = np.full(len(df), 'neutral', dtype=object)
-        cg[(b > s) & (s < 2)] = 'ahead'
-        cg[s == 2] = 'two_strikes'
-        cg[(s > b) & (s < 2)] = 'behind'
-        df['count_group'] = cg
-
-    if 'pitch_group' not in df.columns:
-        df['pitch_group'] = 'fastball'
-
-    if 'loc_bin' not in df.columns:
-        df['loc_bin'] = 'heart'
 
     # Build composite keys for every pitch
     keys = list(zip(
@@ -702,6 +759,7 @@ def score_batters(df, league_model, bayesian_model, min_pitches=200, league_mode
             'deviation_from_league': weighted_dev,
             'chase_deviation':       chase_dev,
             'avg_confidence':        avg_confidence,
+            'metric_definition':     'ev_dva',
         }
         if 'deception_swing_oe' in batter_df.columns:
             rec['deception_swing_oe'] = float(batter_df['deception_swing_oe'].mean())
@@ -714,7 +772,7 @@ def score_batters(df, league_model, bayesian_model, min_pitches=200, league_mode
         'alignment_dva', 'alignment_dva_eb', 'tendency_dva', 'actual_dva',
         'k_shrinkage_ev', 'k_shrinkage_align', 'swing_rate', 'chase_rate',
         'restricted_chase_rate', 'zone_swing_rate', 'deviation_from_league',
-        'chase_deviation', 'avg_confidence', 'z_score', 'swing_rating', 'rank'
+        'chase_deviation', 'avg_confidence', 'metric_definition', 'z_score', 'swing_rating', 'rank'
     ]
     if len(results) == 0:
         return pd.DataFrame(columns=expected_cols)
@@ -780,6 +838,16 @@ def load_baseline_predictions_for_df(df, year=2025, data_dir=None, model_dir=Non
             elif not np.all(np.isfinite(pred_df['xgb_p_swing'])) or (pred_df['xgb_p_swing'] < 0.0).any() or (pred_df['xgb_p_swing'] > 1.0).any():
                 if require_oof:
                     raise ValueError(f"Prediction file {oof_path} contains non-finite or out-of-bounds [0, 1] probabilities!")
+                pred_df = None
+            elif 'xgb_p_swing_perceptual' in pred_df.columns and (
+                pred_df['xgb_p_swing_perceptual'].isna().any() or
+                not np.all(np.isfinite(pred_df['xgb_p_swing_perceptual'])) or
+                (pred_df['xgb_p_swing_perceptual'] < 0.0).any() or
+                (pred_df['xgb_p_swing_perceptual'] > 1.0).any()
+            ):
+                if require_oof:
+                    raise ValueError(f"Prediction file {oof_path} contains non-finite, null, or out-of-bounds [0, 1] perceptual probabilities!")
+                print(f"[Notice] {oof_path} contains invalid perceptual probabilities. Rejecting file under OOF validation.")
                 pred_df = None
             elif 'is_oof' not in pred_df.columns or pred_df['is_oof'].isna().any() or not (pred_df['is_oof'] == True).all():
                 if require_oof:
@@ -884,7 +952,13 @@ def load_baseline_predictions_for_df(df, year=2025, data_dir=None, model_dir=Non
                 df['league_p_swing'] = merged['xgb_p_swing'].values
                 df['p_swing_league'] = merged['xgb_p_swing'].values
                 if 'xgb_p_swing_perceptual' in merged.columns:
-                    df['xgb_p_swing_perceptual'] = merged['xgb_p_swing_perceptual'].values
+                    p_perc = merged['xgb_p_swing_perceptual']
+                    if p_perc.isna().any() or not np.all(np.isfinite(p_perc)) or (p_perc < 0.0).any() or (p_perc > 1.0).any():
+                        if require_oof:
+                            raise ValueError(f"Prediction file {oof_path} contains non-finite, null, or out-of-bounds [0, 1] perceptual probabilities!")
+                        print(f"[Notice] {oof_path} contains invalid perceptual probabilities. Skipping perceptual column.")
+                    else:
+                        df['xgb_p_swing_perceptual'] = p_perc.values
                 print(f"Loaded verified out-of-fold baseline predictions ({len(df):,} pitches) from {oof_path}")
                 return df
             

@@ -24,6 +24,73 @@ def get_db_connection(db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
     return conn
 
+_BATTER_NAME_CACHE = {}
+
+def get_batter_name(batter_id, conn=None):
+    """
+    Resolves the canonical player name for a batter_id.
+    Queries existing database tables (swing_ratings, dva_ratings), then MLB stats API,
+    falling back to 'Player {batter_id}' if unavailable. Never uses opposing pitcher names.
+    """
+    global _BATTER_NAME_CACHE
+    try:
+        bid = int(batter_id)
+    except (ValueError, TypeError):
+        return str(batter_id)
+        
+    if bid in _BATTER_NAME_CACHE:
+        return _BATTER_NAME_CACHE[bid]
+        
+    close_conn = False
+    if conn is None:
+        try:
+            conn = get_db_connection()
+            close_conn = True
+        except Exception:
+            conn = None
+            
+    if conn is not None:
+        try:
+            cursor = conn.cursor()
+            for tbl in ['swing_ratings', 'dva_ratings']:
+                cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{tbl}'")
+                if cursor.fetchone():
+                    cursor.execute(f"PRAGMA table_info({tbl})")
+                    cols = [r[1] for r in cursor.fetchall()]
+                    name_col = 'player_name' if 'player_name' in cols else ('name' if 'name' in cols else None)
+                    if name_col:
+                        cursor.execute(
+                            f"SELECT {name_col} FROM {tbl} WHERE batter_id = ? AND {name_col} IS NOT NULL AND {name_col} != '' LIMIT 1",
+                            (bid,)
+                        )
+                        row = cursor.fetchone()
+                        if row and row[0] and str(row[0]).strip() and not str(row[0]).startswith("Player "):
+                            _BATTER_NAME_CACHE[bid] = str(row[0]).strip()
+                            return _BATTER_NAME_CACHE[bid]
+        except Exception:
+            pass
+        finally:
+            if close_conn and conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    # Fallback to MLB Stats API
+    import urllib.request
+    import json
+    url = f"https://statsapi.mlb.com/api/v1/people/{bid}"
+    try:
+        req = urllib.request.urlopen(url, timeout=3)
+        data = json.loads(req.read())
+        name = data['people'][0]['fullName']
+        _BATTER_NAME_CACHE[bid] = name
+        return name
+    except Exception:
+        name = f"Player {bid}"
+        _BATTER_NAME_CACHE[bid] = name
+        return name
+
 def sync_feather_to_sql(years=None):
     """
     Reads Feather files using StatcastDataHandler and writes them to the SQLite DB.

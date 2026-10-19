@@ -41,7 +41,7 @@ def validate_schema(df: pd.DataFrame, source_name: str, required_cols=None) -> p
     return df
 
 
-def load_all_swing_ratings(min_pitches=300, source='csv', validate=True):
+def load_all_swing_ratings(min_pitches=300, source='csv', validate=True, metric_filter=None):
     """
     Loads swing ratings across all available seasons with explicit source precedence.
     
@@ -80,6 +80,9 @@ def load_all_swing_ratings(min_pitches=300, source='csv', validate=True):
                     base = os.path.basename(csv_file)
                     yr = int(base.split('_')[0])
                     c_df['season'] = yr
+                if 'metric_definition' not in c_df.columns:
+                    yr = int(c_df['season'].iloc[0]) if len(c_df) > 0 and 'season' in c_df.columns else 2025
+                    c_df['metric_definition'] = 'ev_dva' if (yr == 2025 or 'ev_dva_eb' in c_df.columns) else 'alignment_dva_legacy'
                 if validate:
                     c_df = validate_schema(c_df, source_name=os.path.basename(csv_file))
                 records.append(c_df)
@@ -98,6 +101,11 @@ def load_all_swing_ratings(min_pitches=300, source='csv', validate=True):
                 if cursor.fetchone():
                     db_df = pd.read_sql_query("SELECT * FROM swing_ratings", conn)
                     if len(db_df) > 0 and 'season' in db_df.columns:
+                        if 'metric_definition' not in db_df.columns:
+                            db_df['metric_definition'] = np.where(
+                                (db_df['season'] == 2025) | ('ev_dva_eb' in db_df.columns),
+                                'ev_dva', 'alignment_dva_legacy'
+                            )
                         if validate:
                             db_df = validate_schema(db_df, source_name='sqlite:swing_ratings')
                         records.append(db_df)
@@ -128,6 +136,9 @@ def load_all_swing_ratings(min_pitches=300, source='csv', validate=True):
         all_df = all_df.drop_duplicates(subset=['batter_id', 'season']).reset_index(drop=True)
     else:
         all_df = all_df.reset_index(drop=True)
+
+    if metric_filter is not None and 'metric_definition' in all_df.columns:
+        all_df = all_df[all_df['metric_definition'] == metric_filter].reset_index(drop=True)
 
     if 'zone_swing_rate' in all_df.columns and 'chase_rate' in all_df.columns:
         all_df['z_minus_o'] = all_df['zone_swing_rate'] - all_df['chase_rate']

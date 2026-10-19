@@ -246,6 +246,11 @@ class LSTMEyeScorer:
             r = np.atleast_1d(r).astype(np.float64)
             
         h, k, r = np.broadcast_arrays(h, k, r)
+        
+        # Clamp integration limits to computational bounds to eliminate non-finite singularities
+        h = np.clip(h, -40.0, 40.0)
+        k = np.clip(k, -40.0, 40.0)
+        
         out = np.zeros_like(h, dtype=np.float64)
         
         # Zero correlation: product of standard normal CDFs
@@ -284,25 +289,37 @@ class LSTMEyeScorer:
         Integrates the bivariate Gaussian over the strike zone rectangle:
             x in [-sz_width/2, sz_width/2], z in [sz_bot, sz_top]
         """
+        # Determine scalar output based on all broadcast inputs
+        inputs = [mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot]
+        if rho is not None:
+            inputs.append(rho)
+        is_scalar = all(np.ndim(x) == 0 for x in inputs)
+
         sigma_x = np.maximum(sigma_x, 1e-6)
         sigma_z = np.maximum(sigma_z, 1e-6)
         
-        x_min = -sz_width / 2
-        x_max = sz_width / 2
+        sz_w = np.maximum(sz_width, 1e-6)
+        x_min = -sz_w / 2.0
+        x_max = sz_w / 2.0
+        
+        z_min = np.minimum(sz_bot, sz_top)
+        z_max = np.maximum(sz_bot, sz_top)
         
         u1 = (x_min - mu_x) / sigma_x
         u2 = (x_max - mu_x) / sigma_x
-        v1 = (sz_bot - mu_z) / sigma_z
-        v2 = (sz_top - mu_z) / sigma_z
+        v1 = (z_min - mu_z) / sigma_z
+        v2 = (z_max - mu_z) / sigma_z
         
         if rho is None or np.all(np.abs(rho) < 1e-7):
-            p_x = norm.cdf(u2) - norm.cdf(u1)
-            p_z = norm.cdf(v2) - norm.cdf(v1)
-            return p_x * p_z
+            p_x = np.maximum(norm.cdf(u2) - norm.cdf(u1), 0.0)
+            p_z = np.maximum(norm.cdf(v2) - norm.cdf(v1), 0.0)
+            res = np.clip(p_x * p_z, 0.0, 1.0)
+            return float(np.asarray(res).item()) if is_scalar else np.asarray(res)
         
         bvn = LSTMEyeScorer._bvn_cdf
         p_strike = bvn(u2, v2, rho) - bvn(u1, v2, rho) - bvn(u2, v1, rho) + bvn(u1, v1, rho)
-        return np.clip(p_strike, 0.0, 1.0)
+        res = np.clip(p_strike, 0.0, 1.0)
+        return float(np.asarray(res).item()) if is_scalar else np.asarray(res)
 
     @staticmethod
     def compute_uncertainty_vol(sigma_x, sigma_z, rho=None):
@@ -321,21 +338,80 @@ class LSTMEyeScorer:
     def compute_mahalanobis_edge_dist(mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot,
                                       rho=None, sz_width=17/12):
         """
-        Distance from (mu_x, mu_z) to the nearest rectangular strike zone boundary,
-        normalized by directional standard deviation.
+        Computes the exact Mahalanobis distance from belief location (mu_x, mu_z) to the
+        nearest point on the bounded rectangular strike zone boundary under covariance Sigma(sigma_x, sigma_z, rho).
+        
+        Solves the exact 1D quadratic minimization along all four bounded line segments of the
+        strike zone rectangle:
+            D_M = min_{p in boundary} sqrt( (mu - p).T @ inv(Sigma) @ (mu - p) )
         """
-        sigma_x = np.maximum(sigma_x, 1e-6)
-        sigma_z = np.maximum(sigma_z, 1e-6)
+        inputs = [mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot]
+        if rho is not None:
+            inputs.append(rho)
+        is_scalar = all(np.ndim(x) == 0 for x in inputs)
+
+        mu_x = np.asarray(mu_x, dtype=np.float64)
+        mu_z = np.asarray(mu_z, dtype=np.float64)
+        sigma_x = np.maximum(np.asarray(sigma_x, dtype=np.float64), 1e-6)
+        sigma_z = np.maximum(np.asarray(sigma_z, dtype=np.float64), 1e-6)
+        sz_top = np.asarray(sz_top, dtype=np.float64)
+        sz_bot = np.asarray(sz_bot, dtype=np.float64)
         
-        x_min = -sz_width / 2.0
-        x_max = sz_width / 2.0
+        sz_w = np.maximum(sz_width, 1e-6)
+        x_min = -sz_w / 2.0
+        x_max = sz_w / 2.0
+        z_min = np.minimum(sz_bot, sz_top)
+        z_max = np.maximum(sz_bot, sz_top)
         
-        # Horizontal edge distance
-        d_x = np.minimum(np.abs(mu_x - x_min), np.abs(mu_x - x_max)) / sigma_x
-        # Vertical edge distance
-        d_z = np.minimum(np.abs(mu_z - sz_bot), np.abs(mu_z - sz_top)) / sigma_z
+        if rho is None:
+            rho_arr = np.zeros_like(mu_x, dtype=np.float64)
+        else:
+            rho_arr = np.asarray(rho, dtype=np.float64)
+            if rho_arr.ndim == 0 and mu_x.ndim > 0:
+                rho_arr = np.full_like(mu_x, float(rho_arr), dtype=np.float64)
+                
+        rho_clipped = np.clip(rho_arr, -0.999999, 0.999999)
+        det = np.maximum(1.0 - rho_clipped**2, 1e-6)
+                
+        is_inf = np.isinf(mu_x) | np.isinf(mu_z)
+        mu_x_safe = np.where(is_inf, 0.0, mu_x)
+        mu_z_safe = np.where(is_inf, 0.0, mu_z)
         
-        return np.minimum(d_x, d_z)
+        # 1. Left edge: x = x_min, z in [z_min, z_max]
+        u0 = (x_min - mu_x_safe) / sigma_x
+        z_opt_left = mu_z_safe + rho_clipped * (sigma_z / sigma_x) * (x_min - mu_x_safe)
+        z_clamped_left = np.clip(z_opt_left, z_min, z_max)
+        v_left = (z_clamped_left - mu_z_safe) / sigma_z
+        d_left_sq = (u0**2 - 2.0 * rho_clipped * u0 * v_left + v_left**2) / det
+        
+        # 2. Right edge: x = x_max, z in [z_min, z_max]
+        u1 = (x_max - mu_x_safe) / sigma_x
+        z_opt_right = mu_z_safe + rho_clipped * (sigma_z / sigma_x) * (x_max - mu_x_safe)
+        z_clamped_right = np.clip(z_opt_right, z_min, z_max)
+        v_right = (z_clamped_right - mu_z_safe) / sigma_z
+        d_right_sq = (u1**2 - 2.0 * rho_clipped * u1 * v_right + v_right**2) / det
+        
+        # 3. Bottom edge: z = z_min, x in [x_min, x_max]
+        v0 = (z_min - mu_z_safe) / sigma_z
+        x_opt_bot = mu_x_safe + rho_clipped * (sigma_x / sigma_z) * (z_min - mu_z_safe)
+        x_clamped_bot = np.clip(x_opt_bot, x_min, x_max)
+        u_bot = (x_clamped_bot - mu_x_safe) / sigma_x
+        d_bot_sq = (u_bot**2 - 2.0 * rho_clipped * u_bot * v0 + v0**2) / det
+        
+        # 4. Top edge: z = z_max, x in [x_min, x_max]
+        v1 = (z_max - mu_z_safe) / sigma_z
+        x_opt_top = mu_x_safe + rho_clipped * (sigma_x / sigma_z) * (z_max - mu_z_safe)
+        x_clamped_top = np.clip(x_opt_top, x_min, x_max)
+        u_top = (x_clamped_top - mu_x_safe) / sigma_x
+        d_top_sq = (u_top**2 - 2.0 * rho_clipped * u_top * v1 + v1**2) / det
+        
+        d_min_sq = np.minimum(np.minimum(d_left_sq, d_right_sq), np.minimum(d_bot_sq, d_top_sq))
+        d_m = np.sqrt(np.maximum(d_min_sq, 0.0))
+        d_m = np.where(is_inf, np.inf, d_m)
+        
+        if is_scalar:
+            return float(np.asarray(d_m).item())
+        return np.asarray(d_m)
 
     @staticmethod
     def compute_boundary_orthogonal_uncertainty(mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot,
@@ -353,6 +429,11 @@ class LSTMEyeScorer:
             edge_dist: Euclidean distance from (mu_x, mu_z) to nearest strike-zone boundary
             sigma_perp: Directional standard deviation perpendicular to nearest strike-zone boundary
         """
+        inputs = [mu_x, mu_z, sigma_x, sigma_z, sz_top, sz_bot]
+        if rho is not None:
+            inputs.append(rho)
+        is_scalar = all(np.ndim(x) == 0 for x in inputs)
+
         mu_x = np.asarray(mu_x, dtype=np.float64)
         mu_z = np.asarray(mu_z, dtype=np.float64)
         sigma_x = np.asarray(sigma_x, dtype=np.float64)
@@ -363,20 +444,23 @@ class LSTMEyeScorer:
             rho = np.zeros_like(mu_x, dtype=np.float64)
         else:
             rho = np.asarray(rho, dtype=np.float64)
-            if rho.ndim == 0:
+            if rho.ndim == 0 and mu_x.ndim > 0:
                 rho = np.full_like(mu_x, float(rho), dtype=np.float64)
+        rho = np.clip(rho, -0.999999, 0.999999)
         
         sz_w_half = sz_width / 2.0
+        z_min = np.minimum(sz_bot, sz_top)
+        z_max = np.maximum(sz_bot, sz_top)
         
         # Closest point on the rectangular strike zone
         x_clamped = np.clip(mu_x, -sz_w_half, sz_w_half)
-        z_clamped = np.clip(mu_z, sz_bot, sz_top)
+        z_clamped = np.clip(mu_z, z_min, z_max)
         
-        inside_mask = (np.abs(mu_x) <= sz_w_half) & (mu_z >= sz_bot) & (mu_z <= sz_top)
+        inside_mask = (np.abs(mu_x) <= sz_w_half) & (mu_z >= z_min) & (mu_z <= z_max)
         
         # 1. Inside zone: distance to the 4 edges
         d_x = sz_w_half - np.abs(mu_x)
-        d_z = np.minimum(np.abs(mu_z - sz_bot), np.abs(mu_z - sz_top))
+        d_z = np.minimum(np.abs(mu_z - z_min), np.abs(mu_z - z_max))
         dist_inside = np.minimum(d_x, d_z)
         sigma_perp_inside = np.where(d_x <= d_z, sigma_x, sigma_z)
         
@@ -396,8 +480,11 @@ class LSTMEyeScorer:
         
         edge_dist = np.where(inside_mask, dist_inside, dist_outside)
         sigma_perp = np.where(inside_mask, sigma_perp_inside, sigma_perp_outside)
+        edge_dist, sigma_perp = np.broadcast_arrays(edge_dist, sigma_perp)
         
-        return edge_dist, sigma_perp
+        if is_scalar:
+            return float(np.asarray(edge_dist).item()), float(np.asarray(sigma_perp).item())
+        return np.asarray(edge_dist), np.asarray(sigma_perp)
     
     def score_batter(self, df_batter):
         """

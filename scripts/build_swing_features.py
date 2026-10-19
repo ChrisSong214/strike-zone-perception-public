@@ -30,6 +30,8 @@ from src.db_manager import get_db_connection
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), '..', 'data', 'training')
 
+FEATURE_VERSION = "2026.1-chebyshev"
+
 SWING_EVENTS = {
     'hit_into_play', 'foul', 'swinging_strike', 'swinging_strike_blocked',
     'foul_tip', 'foul_bunt', 'missed_bunt', 'bunt_foul_tip'
@@ -39,6 +41,68 @@ SWING_EVENTS = {
 FASTBALL_TYPES = {'FF', 'SI', 'FC', 'FA'}
 BREAKING_TYPES = {'SL', 'CU', 'KC', 'SV', 'CS', 'SC', 'ST', 'KN'}
 OFFSPEED_TYPES = {'CH', 'FS', 'FO', 'EP'}
+
+
+def validate_feature_geometry(df):
+    """
+    Validates that a feature DataFrame satisfies current rectangular Chebyshev geometry.
+    Raises ValueError if geometry equations or zone labels diverge.
+    """
+    required_cols = ['loc_x_norm', 'loc_z_norm', 'dist_from_center', 'in_zone', 'loc_bin']
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Feature matrix missing required geometry columns: {missing}")
+        
+    expected_chebyshev = np.maximum(df['loc_x_norm'].abs(), df['loc_z_norm'].abs())
+    max_dist_diff = float(np.nanmax(np.abs(df['dist_from_center'] - expected_chebyshev)))
+    if max_dist_diff > 1e-5:
+        raise ValueError(
+            f"Feature matrix fails Chebyshev distance validation: max discrepancy {max_dist_diff:.6f} "
+            f"(likely legacy Euclidean hypot). Rebuild features with scripts/build_swing_features.py."
+        )
+        
+    expected_in_zone = (df['dist_from_center'] <= 1.0).astype(int)
+    mismatched_zone = int((df['in_zone'] != expected_in_zone).sum())
+    if mismatched_zone > 0:
+        raise ValueError(
+            f"Feature matrix fails in_zone validation: {mismatched_zone:,} rows disagree with "
+            f"(dist_from_center <= 1.0). Rebuild features with scripts/build_swing_features.py."
+        )
+    return True
+
+
+def rebuild_feature_geometry(df):
+    """Recomputes normalized Chebyshev coordinates, zone indicators, and location bins."""
+    df = df.copy()
+    sz_mid_z = (df['sz_top'] + df['sz_bot']) / 2.0
+    sz_height = df['sz_top'] - df['sz_bot']
+    sz_width = 17.0 / 12.0  # feet
+    
+    df['loc_x_norm'] = df['plate_x'] / (sz_width / 2.0)
+    df['loc_z_norm'] = (df['plate_z'] - sz_mid_z) / (sz_height / 2.0)
+    df['dist_from_center'] = np.maximum(df['loc_x_norm'].abs(), df['loc_z_norm'].abs())
+    
+    df['loc_bin'] = 'chase'
+    df.loc[df['dist_from_center'] <= 1.0, 'loc_bin'] = 'zone'
+    df.loc[(df['dist_from_center'] > 1.0) & (df['dist_from_center'] <= 1.5), 'loc_bin'] = 'edge'
+    
+    df['statcast_zone'] = df['zone']
+    df['in_zone'] = (df['dist_from_center'] <= 1.0).astype(int)
+    df['true_strike'] = df['in_zone'].copy()
+    
+    if 'lstm_p_strike' in df.columns:
+        df['mirage_delta'] = df['lstm_p_strike'] - df['in_zone']
+        
+    if 'lstm_sigma_x' in df.columns and 'lstm_sigma_z' in df.columns and 'lstm_rho' in df.columns:
+        u_vol = LSTMEyeScorer.compute_uncertainty_vol(
+            df['lstm_sigma_x'].values, df['lstm_sigma_z'].values, df['lstm_rho'].values
+        )
+        df['uncertainty_vol'] = u_vol
+        df['log_uncertainty_vol'] = np.log(np.maximum(u_vol, 1e-6))
+        
+    df['feature_version'] = FEATURE_VERSION
+    validate_feature_geometry(df)
+    return df
 
 
 def load_pitches(year):

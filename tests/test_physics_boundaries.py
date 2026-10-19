@@ -7,17 +7,16 @@ class TestPhysicsBoundaryConditions(unittest.TestCase):
 
     def test_time_at_distance_zero_acceleration(self):
         # Test case: Constant velocity (zero acceleration)
-        # y(t) = y0 + vy0*t
-        # A = 0.5 * ay = 0
-        # C = y0 - y_target
-        # delta = vy0^2 - 4*A*C = vy0^2
-        # t1 = -vy0 - sqrt(vy0^2) / 0 -> Division by zero risk!
-        # We must check how the function handles near-zero acceleration.
+        # y(t) = y0 + vy0*t -> t = (y_target - y0) / vy0
+        t1, t2 = get_time_at_distance(y_target=50.0, y0=50.0, vy0=5.0, ay=0.0)
+        self.assertEqual(t1, 0.0)
+        self.assertEqual(t2, 0.0)
 
-        # If ay=0, the function will attempt division by zero if not careful.
-        # We test a slight non-zero acceleration to ensure the calculation path is valid.
-        with self.assertRaises(ZeroDivisionError):
-            get_time_at_distance(y_target=50.0, y0=50.0, vy0=5.0, ay=0.0)
+        t_step = get_time_at_distance(y_target=55.0, y0=50.0, vy0=5.0, ay=0.0)
+        self.assertEqual(t_step, (1.0, 1.0))
+
+        # Stationary along y -> unreachable
+        self.assertIsNone(get_time_at_distance(y_target=55.0, y0=50.0, vy0=0.0, ay=0.0))
 
     def test_time_at_distance_simple_fall(self):
         # Test case: Simple free-fall from 100ft to 1.417ft (y0=100, ay=-32.2)

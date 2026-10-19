@@ -41,6 +41,13 @@ os.chdir(_PROJECT_ROOT)
 from src.lstm_scoring import LSTMEyeScorer
 from src.swing_model import LeagueSwingModel
 
+LEADERBOARD_COLUMNS = [
+    'batter_id', 'player_name', 'n_borderline', 'borderline_swing_rate',
+    'alpha_i', 'beta_P_i', 'beta_edge_i', 'beta_U_i', 'beta_U_se',
+    'beta_perp_i', 'ambiguity_policy',
+    'z_swing_pct', 'o_swing_pct', 'z_minus_o', 'dva_total', 'deception_vulnerability_index'
+]
+
 
 def load_batter_name_map():
     """Loads player name lookups for batters from leaderboards and json caches."""
@@ -124,10 +131,17 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
 
     # Standardize log uncertainty volume (clip extreme 0.1% outliers for numerical stability)
     log_u = df['log_uncertainty_vol'].values
-    p_low, p_high = np.percentile(log_u, 0.1), np.percentile(log_u, 99.9)
-    log_u_clip = np.clip(log_u, p_low, p_high)
-    u_mean, u_std = log_u_clip.mean(), log_u_clip.std()
-    df['u_zscore'] = (log_u_clip - u_mean) / u_std
+    valid_u = log_u[np.isfinite(log_u)]
+    if len(valid_u) > 0:
+        p_low, p_high = np.percentile(valid_u, 0.1), np.percentile(valid_u, 99.9)
+        fill_val = float(np.nanmedian(valid_u))
+        log_u_clean = np.where(np.isfinite(log_u), log_u, fill_val)
+        log_u_clip = np.clip(log_u_clean, p_low, p_high)
+        u_mean, u_std = float(log_u_clip.mean()), max(float(log_u_clip.std()), 1e-6)
+        u_z = (log_u_clip - u_mean) / u_std
+        df['u_zscore'] = np.where(np.isfinite(u_z), u_z, 0.0)
+    else:
+        df['u_zscore'] = 0.0
 
     # Center strike probability around decision threshold 0.50
     df['p_centered'] = df['lstm_p_strike'] - 0.50
@@ -245,7 +259,10 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
 
         records.append(rec)
 
-    res_df = pd.DataFrame(records)
+    if len(records) == 0:
+        res_df = pd.DataFrame(columns=LEADERBOARD_COLUMNS)
+    else:
+        res_df = pd.DataFrame(records)
 
     # 4. Out-of-Sample Held-Out Log-Likelihood Test (Model A vs Model B)
     # Demonstrating covariance uncertainty adds predictive power AFTER controlling for distance to zone edge and boundary orientation
@@ -344,17 +361,18 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
     print("\n" + "=" * 80)
     print("  ORTHOGONALITY AUDIT: UNCERTAINTY POLICY vs. TRADITIONAL METRICS")
     print("=" * 80)
-    if 'z_swing_pct' in res_df.columns:
+    if 'z_swing_pct' in res_df.columns and not res_df.empty:
         valid_m = res_df.dropna(subset=['z_swing_pct', 'o_swing_pct', 'beta_U_i'])
-        X_trad = valid_m[['z_swing_pct', 'o_swing_pct']].values
-        r2_beta_u = LinearRegression().fit(X_trad, valid_m['beta_U_i']).score(X_trad, valid_m['beta_U_i'])
-        r2_beta_p = LinearRegression().fit(X_trad, valid_m['beta_P_i']).score(X_trad, valid_m['beta_P_i'])
-        r2_alpha = LinearRegression().fit(X_trad, valid_m['alpha_i']).score(X_trad, valid_m['alpha_i'])
+        if len(valid_m) >= 2:
+            X_trad = valid_m[['z_swing_pct', 'o_swing_pct']].values
+            r2_beta_u = LinearRegression().fit(X_trad, valid_m['beta_U_i']).score(X_trad, valid_m['beta_U_i'])
+            r2_beta_p = LinearRegression().fit(X_trad, valid_m['beta_P_i']).score(X_trad, valid_m['beta_P_i'])
+            r2_alpha = LinearRegression().fit(X_trad, valid_m['alpha_i']).score(X_trad, valid_m['alpha_i'])
 
-        print(f"Regressing Batter Policies on Traditional Plate Discipline (Z-Swing%, Chase%):")
-        print(f"  • R² of β_U,i (Uncertainty Policy): {r2_beta_u:.4f}  (Plate discipline explains {r2_beta_u*100:.2f}% of linear variance, {(1 - r2_beta_u)*100:.1f}% unexplained linear variance)")
-        print(f"  • R² of β_P,i (Strike Gradient):   {r2_beta_p:.4f}  (Plate discipline explains {r2_beta_p*100:.2f}% of linear variance, {(1 - r2_beta_p)*100:.1f}% unexplained linear variance)")
-        print(f"  • R² of α_i (Baseline Shift):       {r2_alpha:.4f}   (Plate discipline explains {r2_alpha*100:.2f}% of linear variance, {(1 - r2_alpha)*100:.1f}% unexplained linear variance)")
+            print(f"Regressing Batter Policies on Traditional Plate Discipline (Z-Swing%, Chase%):")
+            print(f"  • R² of β_U,i (Uncertainty Policy): {r2_beta_u:.4f}  (Plate discipline explains {r2_beta_u*100:.2f}% of linear variance, {(1 - r2_beta_u)*100:.1f}% unexplained linear variance)")
+            print(f"  • R² of β_P,i (Strike Gradient):   {r2_beta_p:.4f}  (Plate discipline explains {r2_beta_p*100:.2f}% of linear variance, {(1 - r2_beta_p)*100:.1f}% unexplained linear variance)")
+            print(f"  • R² of α_i (Baseline Shift):       {r2_alpha:.4f}   (Plate discipline explains {r2_alpha*100:.2f}% of linear variance, {(1 - r2_alpha)*100:.1f}% unexplained linear variance)")
 
     # 6. Save Leaderboard CSV
     out_dir = os.path.join(_PROJECT_ROOT, 'data', 'leaderboards')
@@ -367,20 +385,21 @@ def run_uncertainty_sensitivity(year=2025, min_pitches=200, regime='edge', lam=2
     generate_uncertainty_response_curves(res_df, df, year)
 
     # Print summary highlights
-    print("\n" + "=" * 80)
-    print("  TOP AMBIGUITY-TOLERANT HITTERS (β_U > 0: FIRES UNDER UNCERTAINTY)")
-    print("=" * 80)
-    top_u = res_df.sort_values('beta_U_i', ascending=False).head(5)
-    cols_show = ['player_name', 'n_borderline', 'beta_U_i', 'beta_U_se', 'alpha_i', 'beta_P_i']
-    if 'o_swing_pct' in res_df.columns:
-        cols_show += ['o_swing_pct', 'z_swing_pct']
-    print(top_u[cols_show].to_string(index=False))
+    if not res_df.empty:
+        print("\n" + "=" * 80)
+        print("  TOP AMBIGUITY-TOLERANT HITTERS (β_U > 0: FIRES UNDER UNCERTAINTY)")
+        print("=" * 80)
+        top_u = res_df.sort_values('beta_U_i', ascending=False).head(5)
+        cols_show = ['player_name', 'n_borderline', 'beta_U_i', 'beta_U_se', 'alpha_i', 'beta_P_i']
+        if 'o_swing_pct' in res_df.columns:
+            cols_show += ['o_swing_pct', 'z_swing_pct']
+        print(top_u[cols_show].to_string(index=False))
 
-    print("\n" + "=" * 80)
-    print("  TOP UNCERTAINTY-AVERSE HITTERS (β_U < 0: TAKES/FREEZES UNDER UNCERTAINTY)")
-    print("=" * 80)
-    bot_u = res_df.sort_values('beta_U_i', ascending=True).head(5)
-    print(bot_u[cols_show].to_string(index=False))
+        print("\n" + "=" * 80)
+        print("  TOP UNCERTAINTY-AVERSE HITTERS (β_U < 0: TAKES/FREEZES UNDER UNCERTAINTY)")
+        print("=" * 80)
+        bot_u = res_df.sort_values('beta_U_i', ascending=True).head(5)
+        print(bot_u[cols_show].to_string(index=False))
 
     return res_df
 
@@ -393,15 +412,25 @@ def generate_uncertainty_response_curves(res_df, df, year=2025):
     Pair 1: Steven Kwan vs. Kyle Stowers
     Pair 2: Identical Chase% Pair (~25% Chase): Lars Nootbaar vs. Marcell Ozuna (and Mookie Betts)
     """
+    if res_df.empty or 'player_name' not in res_df.columns:
+        print("Empty leaderboard or missing player_name; skipping response curve generation.")
+        return
+
     out_dir = os.path.join(_PROJECT_ROOT, 'assets', 'presentation')
     os.makedirs(out_dir, exist_ok=True)
     fig_path = os.path.join(out_dir, 'uncertainty_response_curves.png')
 
     # Global uncertainty grid
     log_u = df['log_uncertainty_vol'].values
-    p_low, p_high = np.percentile(log_u, 0.1), np.percentile(log_u, 99.9)
-    log_u_clip = np.clip(log_u, p_low, p_high)
-    u_mean, u_std = log_u_clip.mean(), log_u_clip.std()
+    valid_u = log_u[np.isfinite(log_u)]
+    if len(valid_u) > 0:
+        p_low, p_high = np.percentile(valid_u, 0.1), np.percentile(valid_u, 99.9)
+        fill_val = float(np.nanmedian(valid_u))
+        log_u_clean = np.where(np.isfinite(log_u), log_u, fill_val)
+        log_u_clip = np.clip(log_u_clean, p_low, p_high)
+        u_mean, u_std = float(log_u_clip.mean()), max(float(log_u_clip.std()), 1e-6)
+    else:
+        u_mean, u_std = 0.0, 1.0
 
     # Grid spanning -2.5 to +2.5 standard deviations of uncertainty
     u_z_grid = np.linspace(-2.5, 2.5, 200)
@@ -413,8 +442,7 @@ def generate_uncertainty_response_curves(res_df, df, year=2025):
     sns.set_theme(style='whitegrid', font_scale=1.05)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7), dpi=300)
 
-    # ---------------- PANEL 1: Archetype Contrast (Kwan vs. Stowers) ----------------
-    # Look up parameters
+    # ---------------- PANEL 1: Archetype Contrast (Kwan vs. Stowers / Betts vs. Ohtani) ----------------
     kwan_row = res_df[res_df['player_name'].str.contains('Kwan', na=False, case=False)]
     stowers_row = res_df[res_df['player_name'].str.contains('Stowers', na=False, case=False)]
     betts_row = res_df[res_df['player_name'].str.contains('Betts', na=False, case=False)]
@@ -427,8 +455,37 @@ def generate_uncertainty_response_curves(res_df, df, year=2025):
         eta = league_logit_edge + alpha + beta_u * u_z_grid
         return expit(eta)
 
-    ax1.plot(u_z_grid, calc_curve(betts_row), color='#005A9C', lw=3.2, label=f"Mookie Betts (β_U = {betts_row['beta_U_i'].values[0]:+.2f}, Averse)")
-    ax1.plot(u_z_grid, calc_curve(ohtani_row), color='#BA0C2F', lw=3.2, label=f"Shohei Ohtani (β_U = {ohtani_row['beta_U_i'].values[0]:+.2f}, Seeking)")
+    has_betts = len(betts_row) > 0
+    has_ohtani = len(ohtani_row) > 0
+
+    if has_betts:
+        ax1.plot(u_z_grid, calc_curve(betts_row), color='#005A9C', lw=3.2, label=f"Mookie Betts (β_U = {betts_row['beta_U_i'].values[0]:+.2f}, Averse)")
+        ax1.annotate(
+            "Mookie Betts: Extreme Aversion\nTakes borderline pitches when\nearly covariance ellipse is wide",
+            xy=(1.8, calc_curve(betts_row)[-15]), xytext=(0.4, 0.26),
+            arrowprops=dict(arrowstyle="->", color='#005A9C', lw=1.5),
+            bbox=dict(boxstyle="round,pad=0.4", fc="#F0F8FF", ec="#005A9C", lw=1.2),
+            fontsize=9.5
+        )
+    elif len(res_df) > 0:
+        averse_row = res_df.sort_values('beta_U_i').iloc[[0]]
+        ax1.plot(u_z_grid, calc_curve(averse_row), color='#005A9C', lw=3.2,
+                 label=f"{averse_row['player_name'].values[0]} (β_U = {averse_row['beta_U_i'].values[0]:+.2f}, Averse)")
+
+    if has_ohtani:
+        ax1.plot(u_z_grid, calc_curve(ohtani_row), color='#BA0C2F', lw=3.2, label=f"Shohei Ohtani (β_U = {ohtani_row['beta_U_i'].values[0]:+.2f}, Seeking)")
+        ax1.annotate(
+            "Shohei Ohtani: Ambiguity Tolerant\nFires aggressively when\nperceptual uncertainty expands",
+            xy=(1.8, calc_curve(ohtani_row)[-15]), xytext=(0.3, 0.77),
+            arrowprops=dict(arrowstyle="->", color='#BA0C2F', lw=1.5),
+            bbox=dict(boxstyle="round,pad=0.4", fc="#FFF0F0", ec="#BA0C2F", lw=1.2),
+            fontsize=9.5
+        )
+    elif len(res_df) > 1:
+        tolerant_row = res_df.sort_values('beta_U_i').iloc[[-1]]
+        ax1.plot(u_z_grid, calc_curve(tolerant_row), color='#BA0C2F', lw=3.2,
+                 label=f"{tolerant_row['player_name'].values[0]} (β_U = {tolerant_row['beta_U_i'].values[0]:+.2f}, Seeking)")
+
     if len(stowers_row) > 0:
         ax1.plot(u_z_grid, calc_curve(stowers_row), color='#E66101', lw=2.4, ls='--', label=f"Kyle Stowers (β_U = {stowers_row['beta_U_i'].values[0]:+.2f})")
     if len(kwan_row) > 0:
@@ -438,29 +495,13 @@ def generate_uncertainty_response_curves(res_df, df, year=2025):
     eta_league = league_logit_edge + 0.0 * u_z_grid
     ax1.plot(u_z_grid, expit(eta_league), color='gray', lw=1.8, ls=':', label='League Average Baseline')
 
-    ax1.set_title("Perceptual Uncertainty Response: Dodgers Superstars\n(Borderline Pitches at P(Strike) = 0.50)", fontsize=13, fontweight='bold', pad=12)
-    ax1.set_xlabel(r"Early Flight Spatial Uncertainty Volume (Z-Score of log $\sqrt{\det \mathbf{\Sigma}_{0.40}}$)", fontsize=11)
+    ax1.set_title("Trajectory-Model Forecast Uncertainty Response: Exemplar Profiles\n(Borderline Pitches at P(Strike) = 0.50)", fontsize=13, fontweight='bold', pad=12)
+    ax1.set_xlabel(r"Trajectory Forecast Uncertainty Volume (Z-Score of log $\sqrt{\det \mathbf{\Sigma}_{0.40}}$)", fontsize=11)
     ax1.set_ylabel("Predicted Swing Probability P(Swing)", fontsize=11)
     ax1.set_ylim(0.20, 0.85)
     ax1.legend(loc='upper left', frameon=True, framealpha=0.95, facecolor='white')
 
-    ax1.annotate(
-        "Mookie Betts: Extreme Aversion\nTakes borderline pitches when\nearly covariance ellipse is wide",
-        xy=(1.8, calc_curve(betts_row)[-15]), xytext=(0.4, 0.26),
-        arrowprops=dict(arrowstyle="->", color='#005A9C', lw=1.5),
-        bbox=dict(boxstyle="round,pad=0.4", fc="#F0F8FF", ec="#005A9C", lw=1.2),
-        fontsize=9.5
-    )
-
-    ax1.annotate(
-        "Shohei Ohtani: Ambiguity Tolerant\nFires aggressively when\nperceptual uncertainty expands",
-        xy=(1.8, calc_curve(ohtani_row)[-15]), xytext=(0.3, 0.77),
-        arrowprops=dict(arrowstyle="->", color='#BA0C2F', lw=1.5),
-        bbox=dict(boxstyle="round,pad=0.4", fc="#FFF0F0", ec="#BA0C2F", lw=1.2),
-        fontsize=9.5
-    )
-
-    # ---------------- PANEL 2: Identical 25% Chase% Pair (Nootbaar vs. Ozuna) ----------------
+    # ---------------- PANEL 2: Identical Chase% Comparison ----------------
     noot_row = res_df[res_df['player_name'].str.contains('Nootbaar', na=False, case=False)]
     ozuna_row = res_df[res_df['player_name'].str.contains('Ozuna', na=False, case=False)]
 
@@ -472,19 +513,29 @@ def generate_uncertainty_response_curves(res_df, df, year=2025):
         ax2.plot(u_z_grid, expit(eta_league), color='gray', lw=1.8, ls=':', label='League Average Baseline')
 
         ax2.annotate(
-            "Identical 25% Chase Rate,\nOpposite Uncertainty Policies:\n• Nootbaar swings under high blur\n• Ozuna shuts down under high blur",
+            "Identical 25% Chase Rate,\nOpposite Uncertainty Policies:\n• Nootbaar swings under high forecast uncertainty\n• Ozuna takes under high forecast uncertainty",
             xy=(0, 0.60), xytext=(-2.3, 0.70),
             bbox=dict(boxstyle="round,pad=0.5", fc="#FFFFE0", ec="#B8860B", lw=1.2),
             fontsize=10
         )
+    elif len(res_df) >= 2:
+        ex1 = res_df.iloc[[0]]
+        ex2 = res_df.iloc[[-1]]
+        ax2.plot(u_z_grid, calc_curve(ex1), color='#D95F02', lw=2.4, label=f"{ex1['player_name'].values[0]} (β_U = {ex1['beta_U_i'].values[0]:+.2f})")
+        ax2.plot(u_z_grid, calc_curve(ex2), color='#7570B3', lw=2.4, label=f"{ex2['player_name'].values[0]} (β_U = {ex2['beta_U_i'].values[0]:+.2f})")
+        ax2.plot(u_z_grid, expit(eta_league), color='gray', lw=1.8, ls=':', label='League Average Baseline')
+    elif len(res_df) == 1:
+        ex1 = res_df.iloc[[0]]
+        ax2.plot(u_z_grid, calc_curve(ex1), color='#D95F02', lw=2.4, label=f"{ex1['player_name'].values[0]} (β_U = {ex1['beta_U_i'].values[0]:+.2f})")
+        ax2.plot(u_z_grid, expit(eta_league), color='gray', lw=1.8, ls=':', label='League Average Baseline')
 
-    ax2.set_title("Decoupled from Plate Discipline: Identical Chase% Comparison\n(Both Hitters ~25.2% Chase Rate)", fontsize=13, fontweight='bold', pad=12)
-    ax2.set_xlabel(r"Early Flight Spatial Uncertainty Volume (Z-Score of log $\sqrt{\det \mathbf{\Sigma}_{0.40}}$)", fontsize=11)
+    ax2.set_title("Decoupled from Plate Discipline: Individual Policy Contrast\n(Trajectory-Model Forecast Uncertainty)", fontsize=13, fontweight='bold', pad=12)
+    ax2.set_xlabel(r"Trajectory Forecast Uncertainty Volume (Z-Score of log $\sqrt{\det \mathbf{\Sigma}_{0.40}}$)", fontsize=11)
     ax2.set_ylabel("Predicted Swing Probability P(Swing)", fontsize=11)
     ax2.set_ylim(0.20, 0.85)
     ax2.legend(loc='lower left', frameon=True, framealpha=0.95, facecolor='white')
 
-    plt.suptitle(r"Individual Batter Visual Uncertainty Policies (MDN Covariance Volume $\sqrt{\det \mathbf{\Sigma}_{0.40}}$)",
+    plt.suptitle(r"Individual Batter Trajectory Forecast Uncertainty Policies (MDN Covariance Volume $\sqrt{\det \mathbf{\Sigma}_{0.40}}$)",
                  fontsize=15, fontweight='bold', y=0.98)
     plt.tight_layout()
 

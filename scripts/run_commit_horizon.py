@@ -397,9 +397,9 @@ def run_commit_horizon_analysis(year=2025, min_pitches=500):
     print(f"  Median Horizon: {res_df['info_horizon_tau'].median():.3f} ({res_df['info_horizon_tau'].median()*avg_flight_ms:.0f} ms)")
     print(f"  Std Dev: {res_df['info_horizon_tau'].std():.3f} | Mean SE: {res_df['info_horizon_se'].mean():.3f}")
 
-    # Correlate with Bat Speed & Swing Length (Independent Biomechanical Validation)
+    # Correlate with Bat Speed & Swing Length (Exploratory Kinematic Comparison)
     print("\n" + "=" * 80)
-    print("  INDEPENDENT BIOMECHANICAL VALIDATION: STATCAST BAT-TRACKING CORRELATION")
+    print("  EXPLORATORY KINEMATIC COMPARISON: STATCAST BAT-TRACKING CORRELATION")
     print("=" * 80)
     if 'mean_bat_speed' in res_df.columns:
         valid_bt = res_df.dropna(subset=['mean_bat_speed', 'mean_swing_length', 'info_horizon_tau'])
@@ -407,11 +407,18 @@ def run_commit_horizon_analysis(year=2025, min_pitches=500):
             r_speed, p_speed = stats.pearsonr(valid_bt['info_horizon_tau'], valid_bt['mean_bat_speed'])
             r_length, p_length = stats.pearsonr(valid_bt['info_horizon_tau'], valid_bt['mean_swing_length'])
             print(f"Matched {len(valid_bt)} hitters with verified 2025 Statcast bat tracking:")
-            print(f"  • Correlation with Bat Speed:    r = {r_speed:+.3f} (p = {p_speed:.3e})")
-            print(f"  • Correlation with Swing Length:  r = {r_length:+.3f} (p = {p_length:.3e})")
-            print("  Independent External Biomechanical Grounding:")
-            print("  - Hitters with deeper information horizons (τ* >= 0.45) utilize bat acceleration to track longer.")
-            print("  - Hitters with early information horizons (τ* <= 0.35) initiate early based on early-trajectory forecasts.")
+            print(f"  • Correlation with Bat Speed:    r = {r_speed:+.3f} (p = {p_speed:.3f})")
+            print(f"  • Correlation with Swing Length:  r = {r_length:+.3f} (p = {p_length:.3f})")
+            print("  Statcast Bat-Tracking Empirical Evaluation:")
+            print(f"  - Essentially no linear association is observed (|r| < 0.05, p > 0.70).")
+            print("  - Interpretation: The inferred horizon τ* does not merely track gross swing mechanics (bat speed or swing length).")
+            print("    However, null correlations also do not establish a cognitive mechanism; τ* should be interpreted as an")
+            print("    exploratory fitted index of empirical information accumulation timing.")
+
+    b_early = (res_df['info_horizon_tau'] <= 0.32).sum()
+    b_mid = ((res_df['info_horizon_tau'] > 0.32) & (res_df['info_horizon_tau'] <= 0.42)).sum()
+    b_late = (res_df['info_horizon_tau'] > 0.42).sum()
+    print(f"\n  Horizon Buckets: Early (τ* <= 0.32): {b_early} | Mid (0.32 < τ* <= 0.42): {b_mid} | Late (τ* > 0.42): {b_late}")
 
     # Generate Figures
     generate_commit_horizon_figures(res_df, year)
@@ -436,7 +443,7 @@ def generate_commit_horizon_figures(res_df, year=2025):
     Generates slide-ready 300 DPI publication plots:
     1. Continuous distribution of Inferred Information-Use Horizons (τ*)
     2. Scatter plot of Inferred Information-Use Horizon (τ*) vs. Statcast Bat Speed & Swing Length
-       as independent biomechanical validation.
+       as an exploratory kinematic comparison.
     """
     out_dir = os.path.join(_PROJECT_ROOT, 'assets', 'presentation')
     os.makedirs(out_dir, exist_ok=True)
@@ -497,7 +504,7 @@ def generate_commit_horizon_figures(res_df, year=2025):
                     fontsize=8.5, fontweight='bold'
                 )
 
-        ax2.set_title("External Biomechanical Validation: Information Horizon vs. Bat Speed\n(Statcast 2025 Match Sample)",
+        ax2.set_title("Inferred Information Horizon vs. Statcast Bat Speed\n(Exploratory Kinematic Comparison, 2025)",
                       fontsize=13, fontweight='bold', pad=12)
         ax2.set_xlabel("Inferred Information-Use Horizon (Fraction of Flight τ*)", fontsize=11)
         ax2.set_ylabel("Statcast Mean Bat Speed (mph)", fontsize=11)

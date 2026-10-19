@@ -24,7 +24,7 @@ import pandas as pd
 import numpy as np
 
 from src.lstm_scoring import LSTMEyeScorer
-from src.db_manager import get_db_connection, save_lstm_eye_ratings
+from src.db_manager import get_db_connection, save_lstm_eye_ratings, get_batter_name
 
 
 SWING_EVENTS = {
@@ -40,7 +40,7 @@ def load_pitches(year):
     query = """
     SELECT 
         game_pk, at_bat_number, pitch_number,
-        batter, player_name,
+        batter,
         vx0, vy0, vz0, ax, ay, az,
         release_pos_x, release_pos_y, release_pos_z, release_extension,
         plate_x, plate_z, sz_top, sz_bot,
@@ -113,6 +113,8 @@ def run_leaderboard(years, min_pitches=200, device='cpu', decision_frac=0.40):
             
             batter_df = df[df['batter'] == batter_id]
             
+            p_name = get_batter_name(batter_id)
+            
             try:
                 result = scorer.score_batter(batter_df)
                 
@@ -126,6 +128,7 @@ def run_leaderboard(years, min_pitches=200, device='cpu', decision_frac=0.40):
                 
                 all_results.append({
                     'batter_id': int(batter_id),
+                    'player_name': p_name,
                     'season': year,
                     'n_pitches': result['n_pitches'],
                     'll_per_pitch': result['ll_per_pitch'],
@@ -176,7 +179,7 @@ def run_leaderboard(years, min_pitches=200, device='cpu', decision_frac=0.40):
         print(f"\n{'='*60}")
         print(f"  SEASON {s_val} LEADERBOARD (LL/pitch avg: {s_mu:.4f}, std: {s_sigma:.4f})")
         print(f"{'='*60}")
-        display_cols = ['rank', 'batter_id', 'eye_rating', 'll_per_pitch', 
+        display_cols = ['rank', 'player_name', 'batter_id', 'eye_rating', 'll_per_pitch', 
                         'mean_sigma_x', 'mean_sigma_z', 'n_pitches', 'swing_rate']
         display_cols = [c for c in display_cols if c in s_sub.columns]
         print(f"\n--- TOP 15 (Eagle Eyes) [{s_val}] ---")

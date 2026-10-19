@@ -265,7 +265,9 @@ def main():
     results_df, _ = evaluate_predictive_power(df)
     
     if results_df is not None and len(results_df) > 0:
+        results_df['Metric_Evaluated'] = 'Historical Strike-Alignment DVA (2020-2024)'
         print("\n--- OUT-OF-SAMPLE INCREMENTAL PREDICTION (YEAR N -> N+1) ---")
+        print("[Methodology] Evaluates predictive validity across historical strike-alignment DVA cohorts (2020-2024).")
         print(results_df.to_string(index=False))
         
         out_plot = os.path.join(_PROJECT_ROOT, 'assets', 'presentation', 'predictive_power.png')

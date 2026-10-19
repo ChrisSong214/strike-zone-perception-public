@@ -23,7 +23,7 @@ def detect_breakouts_and_declines(df, min_pa=150):
     if len(seasons) < 3:
         # Need at least 3 seasons for N-1 -> N -> N+1, or 2 for N -> N+1
         if len(seasons) < 2:
-            return None, None
+            return None, None, None
             
     # Pair consecutive seasons
     pairs = []
@@ -36,6 +36,11 @@ def detect_breakouts_and_declines(df, min_pa=150):
         if len(m) > 0:
             m['season_from'] = s1
             m['season_to'] = s2
+            def1 = m['metric_definition_s1'].iloc[0] if 'metric_definition_s1' in m.columns else ('ev_dva' if s1 == 2025 else 'alignment_dva_legacy')
+            def2 = m['metric_definition_s2'].iloc[0] if 'metric_definition_s2' in m.columns else ('ev_dva' if s2 == 2025 else 'alignment_dva_legacy')
+            m['metric_transition'] = (def1 != def2)
+            m['metric_from'] = def1
+            m['metric_to'] = def2
             m['dva_diff'] = m['swing_rating_s2'] - m['swing_rating_s1']
             m['woba_diff'] = m['woba_s2'] - m['woba_s1']
             m['bb_diff'] = (m['bb_pct_s2'] - m['bb_pct_s1']) * 100
@@ -43,18 +48,18 @@ def detect_breakouts_and_declines(df, min_pa=150):
             pairs.append(m)
             
     if not pairs:
-        return None, None
+        return None, None, None
         
     all_pairs = pd.concat(pairs, ignore_index=True)
     
     # Breakout candidates: Biggest DVA gainers
     breakouts = all_pairs.sort_values('dva_diff', ascending=False).head(10)[
-        ['player_name_s1', 'season_from', 'season_to', 'swing_rating_s1', 'swing_rating_s2', 'dva_diff', 'woba_s1', 'woba_s2', 'woba_diff']
+        ['player_name_s1', 'season_from', 'season_to', 'swing_rating_s1', 'swing_rating_s2', 'dva_diff', 'woba_s1', 'woba_s2', 'woba_diff', 'metric_transition']
     ].copy()
     
     # Decline candidates: Biggest DVA droppers
     declines = all_pairs.sort_values('dva_diff', ascending=True).head(10)[
-        ['player_name_s1', 'season_from', 'season_to', 'swing_rating_s1', 'swing_rating_s2', 'dva_diff', 'woba_s1', 'woba_s2', 'woba_diff']
+        ['player_name_s1', 'season_from', 'season_to', 'swing_rating_s1', 'swing_rating_s2', 'dva_diff', 'woba_s1', 'woba_s2', 'woba_diff', 'metric_transition']
     ].copy()
     
     return breakouts, declines, all_pairs
@@ -85,9 +90,9 @@ def plot_breakout_scatter(all_pairs, save_path):
     ax.axvline(0, color='grey', linestyle=':', alpha=0.6)
     ax.axhline(0, color='grey', linestyle=':', alpha=0.6)
     
-    ax.set_title('Year-over-Year Trajectory: $\Delta$DVA vs. $\Delta$wOBA (Offensive Breakouts)', fontsize=14, fontweight='bold', pad=15)
-    ax.set_xlabel('$\Delta$ Decision Value Added ($\Delta$DVA Rating)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('$\Delta$ Offensive wOBA ($\Delta$wOBA)', fontsize=12, fontweight='bold')
+    ax.set_title(r'Year-over-Year Trajectory: $\Delta$DVA vs. $\Delta$wOBA (Offensive Breakouts)', fontsize=14, fontweight='bold', pad=15)
+    ax.set_xlabel(r'$\Delta$ Decision Value Added ($\Delta$DVA Rating)', fontsize=12, fontweight='bold')
+    ax.set_ylabel(r'$\Delta$ Offensive wOBA ($\Delta$wOBA)', fontsize=12, fontweight='bold')
     ax.legend(fontsize=11, frameon=True)
     
     plt.tight_layout()

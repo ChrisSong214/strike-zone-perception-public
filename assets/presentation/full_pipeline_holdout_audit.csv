@@ -1,20 +1,22 @@
 Metric,Value,Category
-Temporal H1 Brier Score,0.08748782197757982,Temporal Holdout
-Temporal H2 Brier Score,0.08662166361926926,Temporal Holdout
-Temporal H1 ECE,0.09075998833763968,Temporal Holdout
-Temporal H2 ECE,0.08994877189544237,Temporal Holdout
-Temporal H1 AUC,0.9745951177826552,Temporal Holdout
-Temporal H2 AUC,0.9747041721111076,Temporal Holdout
-EV-DVA Split-Half Pearson r,0.7248600482060441,Downstream Stability
-EV-DVA Split-Half Spearman rho,0.6926108436451114,Downstream Stability
-Alignment DVA Split-Half Pearson r,0.7410876782371628,Downstream Stability
-Unseen Pitchers Brier Score,0.08715173931220663,Group Holdout
-Unseen Pitchers ECE,0.09044874975694173,Group Holdout
-Unseen Pitchers AUC,0.9746266746098613,Group Holdout
-Unseen Batters Brier Score,0.08706449431588614,Group Holdout
-Unseen Batters ECE,0.09036246902474501,Group Holdout
-Unseen Batters AUC,0.9746717358671907,Group Holdout
+Temporal H1 Brier Score,0.002255000731617769,Temporal Holdout
+Temporal H2 Brier Score,0.0022141517424921213,Temporal Holdout
+Temporal H1 ECE,0.0018026805040397055,Temporal Holdout
+Temporal H2 ECE,0.0019737326070128503,Temporal Holdout
+Temporal H1 AUC,0.9999717996401388,Temporal Holdout
+Temporal H2 AUC,0.9999731687999825,Temporal Holdout
+EV-DVA Split-Half Pearson r,0.7243531115103344,Downstream Stability
+EV-DVA Split-Half Spearman rho,0.6960019295350711,Downstream Stability
+Alignment DVA Split-Half Pearson r,0.7410327290040863,Downstream Stability
+Pitcher Subgroup Brier Score,0.0022352181393771138,Subgroup Stability
+Pitcher Subgroup ECE,0.0018971869819743054,Subgroup Stability
+Pitcher Subgroup AUC,0.9999724372520392,Subgroup Stability
+Batter Subgroup Brier Score,0.0022339012714912175,Subgroup Stability
+Batter Subgroup ECE,0.0018869270702224512,Subgroup Stability
+Batter Subgroup AUC,0.9999724658222557,Subgroup Stability
 Linear Tangent R2 X (tau=0.40),0.8154875044580298,Kinematics
 Linear Tangent R2 Z (tau=0.40),0.15668395573887828,Kinematics
 Linear Tangent MAE X (inches),3.6516555136918116,Kinematics
 Linear Tangent MAE Z (inches),9.668688611410973,Kinematics
+Ballistic R2 Z (tau=0.40),0.8667218297458374,Kinematics
+Ballistic MAE Z (inches),3.6451483368197057,Kinematics

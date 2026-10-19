@@ -7,9 +7,13 @@ def get_time_at_distance(y_target, y0, vy0, ay):
     y(t) = y0 + vy0*t + 0.5*ay*t^2
     Returns the smallest positive t (or closest to 0 if integrating backwards).
     """
+    if abs(ay) < 1e-7:
+        if abs(vy0) < 1e-12:
+            return None  # Stationary along y; target unreachable
+        t_linear = (y_target - y0) / vy0
+        return t_linear, t_linear
+
     A = 0.5 * ay
-    if A == 0.0:
-        raise ZeroDivisionError("Acceleration along y-axis is zero (linear motion)")
     B = vy0
     C = y0 - y_target
     

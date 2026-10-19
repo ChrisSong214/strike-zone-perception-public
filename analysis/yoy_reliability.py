@@ -30,6 +30,10 @@ def compute_yoy_correlations(df, metrics=None):
         m = pd.merge(df1, df2, on='batter_id', suffixes=('_s1', '_s2'))
         if len(m) >= 25:
             m['pair'] = f"{s1}→{s2}"
+            def1 = m['metric_definition_s1'].iloc[0] if 'metric_definition_s1' in m.columns else ('ev_dva' if s1 == 2025 else 'alignment_dva_legacy')
+            def2 = m['metric_definition_s2'].iloc[0] if 'metric_definition_s2' in m.columns else ('ev_dva' if s2 == 2025 else 'alignment_dva_legacy')
+            m['is_homogeneous_metric'] = (def1 == def2)
+            m['pair_metric_type'] = f"{def1}→{def2}" if def1 != def2 else def1
             pairs.append(m)
             
     if not pairs:

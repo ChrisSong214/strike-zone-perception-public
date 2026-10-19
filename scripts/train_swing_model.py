@@ -60,6 +60,17 @@ def main():
         return
     
     df = pd.read_parquet(feature_path)
+    from scripts.build_swing_features import validate_feature_geometry, rebuild_feature_geometry
+    try:
+        validate_feature_geometry(df)
+        print(f"Feature geometry verified: rectangular Chebyshev distance & consistent zone labels.")
+    except ValueError as e:
+        print(f"[Notice] Feature matrix {feature_path} failed geometry validation: {e}")
+        print(f"  Rebuilding feature matrix under rectangular Chebyshev geometry...")
+        df = rebuild_feature_geometry(df)
+        df.to_parquet(feature_path, index=False)
+        print(f"  Saved verified feature matrix to {feature_path}")
+        
     print(f"Loaded {len(df):,} pitches with {df.shape[1]} features")
     print(f"Swing rate: {df['is_swing'].mean():.3f}")
     

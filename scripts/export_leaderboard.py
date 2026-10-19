@@ -80,6 +80,9 @@ def main():
             if count % 50 == 0:
                 print(f"  Fetched {count}/{n_missing} names...")
 
+    if 'metric_definition' not in lb.columns:
+        lb['metric_definition'] = 'ev_dva' if (args.year == 2025 or 'ev_dva_eb' in lb.columns) else 'alignment_dva_legacy'
+
     # Ensure player_name is the second column (after batter_id or rank)
     cols = [c for c in lb.columns if c != 'player_name']
     if 'rank' in cols:
