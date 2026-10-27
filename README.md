@@ -4,7 +4,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c.svg)](https://pytorch.org/)
 [![XGBoost](https://img.shields.io/badge/XGBoost-1.7+-green.svg)](https://xgboost.readthedocs.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-81%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-101%20passed-brightgreen.svg)]()
 
 > **Research and presentation by Chris Song** presented at the **SABR / SAGB Conference**.  
 > Materials and slides available in [`docs/presentation/`](docs/presentation/).  
@@ -168,18 +168,26 @@ python3 scripts/run_commit_horizon.py --year 2025
 To verify pipeline integrity and address information leakage:
 - **Temporal Holdout Stability:** Evaluating on First-Half (pre-July 1) vs. Second-Half (post-July 1) 2025 proves the upstream LSTM maintains identical calibration (Brier $0.0875$ vs. $0.0866$, ECE $0.0908$ vs. $0.0899$, AUC $0.9746$ vs. $0.9747$) and downstream EV-DVA achieves robust split-half stability ($r = 0.721, p = 3.58 \times 10^{-56}$).
 - **Subgroup Calibration Stability:** 5-fold cross-validation across partitioned pitcher groups (AUC $0.9746 \pm 0.0005$) and batter groups (AUC $0.9747 \pm 0.0005$) confirms consistent calibration stability across arm slots and batters without subgroup degradation.
-- **Kinematic Sensitivity:** Linear tangent projections from $t = 0.40$ explain $82.4\%$ of horizontal plate variance ($R^2_x = 0.8237$, $r = 0.9188$, MAE $3.50$ in), while a gravity-included ballistic baseline ($a_z = -32.174\text{ ft/s}^2$) explains $86.8\%$ of vertical variance ($R^2_z = 0.8677$, $r = 0.9578$, MAE $3.67$ in), demonstrating that early kinematics constrain destination while framing $P(\text{Strike} \mid \mathcal{F}_{0.40})$ as the normative physical upper bound.
+- **Kinematic Sensitivity:** Linear tangent projections from $t = 0.40$ explain **82.4%** of horizontal plate variance ($R^2_x = 0.8237$, $r = 0.9188$, MAE $3.50$ in), while a gravity-included ballistic baseline ($a_z = -32.174\text{ ft/s}^2$) explains **86.8%** of vertical variance ($R^2_z = 0.8677$, $r = 0.9578$, MAE $3.67$ in), demonstrating that early kinematics constrain destination while framing $P(\text{Strike} \mid \mathcal{F}_{0.40})$ as the normative physical upper bound.
 
 ```bash
 python3 analysis/full_pipeline_holdout_audit.py --year 2025
 ```
+
+### 5. Next-Generation Sensorimotor Extensions (Pillars 1–4)
+To evaluate late movement, biological sensory processing, motor commitment deadlines, and individualized barrel utility:
+- **Pillar 4 (Retinal Optics & Psychophysics):** Projects trajectories to spherical retinal optic flow $(\theta, \phi, \psi, \dot{\theta}, \dot{\phi}, \dot{\psi}/\psi)$ with Weber-Fechner sensory noise injection, deterministically guaranteeing zero acceleration leakage at release ($t=0$). (`src/retinal_physics.py`, `scripts/train_retinal_model.py`)
+- **Pillar 1 (Cognitive & Sequential Bayesian Arsenal Fusion):** Pre-release Dirichlet-Multinomial priors $\pi_k^{(0)}$, multi-hypothesis conjugate Gaussian precision weighting, closed-form KL divergence tunneling deception surprise $\mathcal{S}_{\text{tunnel}}$, and Tunnel Amplification Factor (TAF). (`src/bayesian_tunneling.py`, `scripts/run_bayesian_tunneling.py`)
+- **Pillar 2 (Continuous-Time Stochastic Control & Drift-Diffusion):** Drift-Diffusion Model (DDM) with dynamic collapsing decision boundaries anchored to individual Statcast bat-tracking execution windows ($T_{\text{swing}} = 2 \cdot \text{swing\_length} / (\text{bat\_speed} \cdot 1.46667)$). (`src/drift_diffusion.py`, `scripts/run_commit_horizon.py --method ddm`)
+- **Pillar 3 (Individualized Damage Surfaces & Minimax Equilibrium):** Disentangles Universal Zone Recognition DVA from Idiosyncratic Barrel Damage DVA via exact additive orthogonal decomposition ($|\text{Residual}| < 10^{-16}$) and solves game-theoretic Minimax pitch selection. (`src/personalized_utility.py`, `scripts/run_personalized_dva.py`)
+- **Empirical Report:** Comprehensive findings on the 2025 MLB dataset in [`docs/presentation/NEXT_GEN_PILLARS_EMPIRICAL_REPORT_2025.md`](docs/presentation/NEXT_GEN_PILLARS_EMPIRICAL_REPORT_2025.md).
 
 ---
 
 ## 📁 Repository Structure
 
 ```text
-sp26_sagb_dj/
+strike-zone-perception-public/
 ├── assets/                     # Visual figures, plots, and interactive HTML
 │   ├── presentation/           # High-resolution (300 DPI) conference presentation assets
 │   │   ├── mirage_orthogonality_quadrant.png
@@ -192,18 +200,33 @@ sp26_sagb_dj/
 │   ├── stowers_vs_kwan.png
 │   └── perceptual_cloud_3d.html
 ├── data/
-│   ├── leaderboards/           # Tracked CSV exports (DVA, Mirage, Uncertainty, Horizon)
+│   ├── leaderboards/           # Tracked CSV exports (DVA, Mirage, Uncertainty, Horizon, Pillars 1-3)
+│   │   ├── 2020_dva_leaderboard.csv ... 2025_dva_leaderboard.csv
+│   │   ├── 2025_commit_horizon_leaderboard.csv
+│   │   ├── 2025_mirage_batter_leaderboard.csv
+│   │   ├── 2025_mirage_pitcher_leaderboard.csv
+│   │   ├── 2025_uncertainty_sensitivity_leaderboard.csv
+│   │   ├── 2025_tunnel_surprise_leaderboard.csv      # Pillar 1: KL surprise & TAF
+│   │   ├── 2025_ddm_batter_policy.csv               # Pillar 2: DDM parameters & deadlines
+│   │   └── 2025_personalized_dva_leaderboard.csv    # Pillar 3: Universal vs Damage DVA
 │   ├── models/                 # Model checkpoints (best_model.pt, swing_model.xgb)
+│   ├── processed/              # Out-of-sample predictions (oof_next_gen_predictions_2025.parquet)
 │   ├── raw_data/               # Statcast feathers (gitignored; see setup)
 │   └── training/               # Trajectories and parquet features (gitignored)
 ├── docs/
 │   ├── audits/                 # Comprehensive code & pipeline audit logs
-│   └── presentation/           # Empirical findings, presentation slides, & paper notes
+│   └── presentation/           # Empirical findings, presentation slides, & next-gen reports
+│       ├── NEXT_GEN_PILLARS_EMPIRICAL_REPORT_2025.md # 2025 Pillars 1-4 empirical findings
+│       ├── PRESENTATION_FINDINGS_2020_2025.md        # Multi-season conference presentation data
+│       └── SAGB Conference Presentation - Chris Song.pdf
 ├── notebooks/                  # Interactive Jupyter exploration notebooks
 ├── scripts/                    # Core pipeline and training CLI scripts
+│   ├── train_retinal_model.py        # Pillar 4: Retinal perception LSTM training & evaluation
+│   ├── run_bayesian_tunneling.py     # Pillar 1: Bayesian arsenal fusion & KL surprise
+│   ├── run_commit_horizon.py         # Pillar 2: Inferred Information Horizons & DDM policy
+│   ├── run_personalized_dva.py       # Pillar 3: 5-Fold OOF personalized damage DVA
 │   ├── run_mirage_decomposition.py   # Deception vs. Discipline (Mirage Residual ΔP)
 │   ├── run_uncertainty_sensitivity.py # MDN Covariance Sensitivity (det Σ_0.40 & σ_perp)
-│   ├── run_commit_horizon.py         # Inferred Information Horizons (τ*_i) & Bat Tracking
 │   ├── build_training_data.py        # Converts Statcast pitches to (100, 9) tensors
 │   ├── train_model.py                # Trains LSTM+MDN perception model
 │   ├── build_swing_features.py       # Evaluates P(Strike) at decision point
@@ -216,6 +239,10 @@ sp26_sagb_dj/
 │   ├── compare_stowers_kwan_40.py
 │   └── ...
 ├── src/                        # Core Python library
+│   ├── retinal_physics.py      # Pillar 4: Spherical optics, looming tau-dot, Weber noise
+│   ├── bayesian_tunneling.py   # Pillar 1: Dirichlet-Multinomial priors & KL surprise
+│   ├── drift_diffusion.py      # Pillar 2: Collapsing bound DDM & bat-tracking deadlines
+│   ├── personalized_utility.py # Pillar 3: 2D spatial contact surfaces & additive DVA
 │   ├── db_manager.py           # SQLite connection & schema management
 │   ├── dataset.py              # PyTorch Dataset for streaming pitch tracks
 │   ├── model.py                # PitchPerceptionLSTM neural network
@@ -224,7 +251,8 @@ sp26_sagb_dj/
 │   ├── physics.py              # 9-parameter constant acceleration trajectory
 │   ├── uncertainty.py          # Monte Carlo release parameter perturbation
 │   └── scoring.py              # Classical FastEyeScorer MLE
-├── tests/                      # Automated test suite (81 tests in pytest)
+├── tests/                      # Automated test suite (101 unit tests in pytest)
+│   ├── test_next_gen_pillars.py         # Pillars 1–4 verification suite (20 tests)
 │   ├── test_mirage_decomposition.py     # Deception residual, belief shift, & split-half
 │   ├── test_uncertainty_sensitivity.py  # Ridge ambiguity policy, volume, & σ_perp
 │   ├── test_commit_horizon.py           # Information center of mass & delta method SE
@@ -233,14 +261,16 @@ sp26_sagb_dj/
 │   ├── test_lstm_scoring.py             # BVN CDF & strike zone integration
 │   ├── test_oof_provenance.py           # Strict out-of-fold leak guards
 │   ├── test_physics_boundaries.py       # Trajectory kinematics & physics
-│   ├── test_audit_cycle1.py             # Cycle 1 regression suite (EB NaN resilience, canonical bins, linear physics)
-│   ├── test_audit_cycle2.py             # Cycle 2 regression suite (Scalar returns, inverted zone, percentile NaN guards)
-│   ├── test_audit_cycle3.py             # Cycle 3 regression suite (rho=0 continuity, BVN bounds, tuple arity)
-│   └── test_scoring.py                  # Dual baselines, EV-DVA scoring, RE24 values, & ANOVA EB shrinkage
-├── .gitignore                  # Production gitignore for large ML datasets
+│   ├── test_audit_cycle1.py             # Cycle 1 regression suite (EB NaN resilience, etc.)
+│   ├── test_audit_cycle2.py             # Cycle 2 regression suite (Scalar returns, etc.)
+│   ├── test_audit_cycle3.py             # Cycle 3 regression suite (rho=0 continuity, etc.)
+│   └── test_scoring.py                  # Dual baselines, EV-DVA scoring, RE24 values, & EB
+├── .gitattributes              # Linguist configuration (classifies repo as Python)
+├── .gitignore                  # Production gitignore for large ML datasets & credentials
 ├── pyproject.toml              # Modern PEP 517/621 package build config
 ├── requirements.txt            # Python dependencies
 ├── LICENSE                     # MIT License
+├── NEXT_GEN_RESEARCH_EXTENSIONS_SPECIFICATION.md
 └── README.md
 ```
 
@@ -251,8 +281,8 @@ sp26_sagb_dj/
 ### 1. Clone & Set Up Environment
 
 ```bash
-git clone https://github.com/ChrisSong214/strike-zone-perception.git
-cd strike-zone-perception
+git clone https://github.com/ChrisSong214/strike-zone-perception-public.git
+cd strike-zone-perception-public
 
 # Create and activate virtual environment
 python3 -m venv .venv
@@ -269,7 +299,7 @@ pip install -e .
 pytest tests/
 ```
 
-All 81 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, trajectory kinematics, FastEyeScorer filtering and minimum observation guards, strict out-of-fold provenance validation, perceptual mirage decompositions, visual uncertainty sensitivity, sequential commit horizon forward updates, canonical loader schema validation, and dual baseline scoring.
+All 101 unit tests verify boundary conditions, bivariate normal Owen's T integrals, single-particle stability, trajectory kinematics, FastEyeScorer filtering and minimum observation guards, strict out-of-fold provenance validation, perceptual mirage decompositions, visual uncertainty sensitivity, sequential commit horizon forward updates, canonical loader schema validation, dual baseline scoring, retinal zero-leakage projections, Bayesian conjugate precision addition, collapsing DDM boundaries, and DVA additive orthogonal factorization.
 
 ### 3. Export the 2025 Leaderboard
 

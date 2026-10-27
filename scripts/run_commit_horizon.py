@@ -42,6 +42,7 @@ if _PROJECT_ROOT not in sys.path:
 os.chdir(_PROJECT_ROOT)
 
 from src.lstm_scoring import LSTMEyeScorer
+from src.drift_diffusion import CollapsingBoundDDM, compute_swing_duration, compute_motor_deadline
 
 
 TAU_GRID = [0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55]
@@ -522,10 +523,102 @@ def generate_commit_horizon_figures(res_df, year=2025):
     print(f"Generated 300 DPI publication asset at {fig_path}")
 
 
+def run_ddm_analysis(year=2025, min_pitches=500):
+    print("=" * 80)
+    print(f"  BIOMECHANICALLY ANCHORED DRIFT-DIFFUSION MODEL (DDM) ANALYSIS: SEASON {year}")
+    print(f"  Dynamic Collapsing Boundaries with Statcast Bat Tracking | Min Pitches: {min_pitches}")
+    print("=" * 80)
+
+    cache_file = os.path.join(_PROJECT_ROOT, 'data', 'training', f'multi_horizon_p_strike_{year}.parquet')
+    df = extract_multi_horizon_p_strike(year=year, cache_path=cache_file)
+
+    batter_counts = df['batter_id'].value_counts()
+    qual_batters = batter_counts[batter_counts >= min_pitches].index.tolist()
+    print(f"\nQualified Batters (>= {min_pitches} pitches): {len(qual_batters):,}")
+
+    name_map = load_player_names()
+    bt_df = load_bat_tracking(year=year)
+    bt_map = {}
+    if not bt_df.empty:
+        for _, r in bt_df.iterrows():
+            bt_map[int(r['batter_id'])] = (float(r['mean_bat_speed']), float(r['mean_swing_length']))
+
+    ddm_engine = CollapsingBoundDDM(dt=0.005)
+    records = []
+
+    print("\nFitting individual DDM policy parameters (nu, B0, kappa) with motor deadlines...")
+    for bid in qual_batters:
+        sub = df[df['batter_id'] == bid]
+        y = sub['is_swing'].values
+        # Decision point belief p_strike at tau=0.40
+        p_s = sub['p_strike_40'].values
+
+        bat_speed, swing_len = bt_map.get(bid, (69.65, 7.21))
+        t_swing = compute_swing_duration(bat_speed, swing_len)
+        t_deadline = compute_motor_deadline(0.42, t_swing)
+
+        fit_res = ddm_engine.fit_batter(
+            p_strike_values=p_s,
+            swing_labels=y,
+            bat_speed=bat_speed,
+            swing_length=swing_len,
+            t_plate=0.42,
+        )
+
+        nu = fit_res['drift_rate_nu']
+        b0 = fit_res['boundary_b0']
+        kappa = fit_res['collapse_rate_kappa']
+
+        # Classify policy archetype
+        if kappa > 0.65:
+            archetype = "High Urgency Collapse"
+        elif b0 > 2.0 and nu > 6.0:
+            archetype = "Elite Patient Discriminator"
+        elif b0 < 1.0:
+            archetype = "Trigger-Happy Aggressor"
+        else:
+            archetype = "Balanced Stochastic Controller"
+
+        rec = {
+            'batter_id': bid,
+            'player_name': name_map.get(bid, f"ID: {bid}"),
+            'n_pitches': len(sub),
+            'swing_rate': round(float(y.mean()), 4),
+            'drift_rate_nu': round(float(nu), 3),
+            'boundary_b0': round(float(b0), 3),
+            'collapse_rate_kappa': round(float(kappa), 3),
+            't_swing_ms': round(float(t_swing * 1000.0), 1),
+            't_deadline_ms': round(float(t_deadline * 1000.0), 1),
+            'mean_bat_speed': round(float(bat_speed), 1),
+            'mean_swing_length': round(float(swing_len), 2),
+            'ddm_policy_archetype': archetype,
+        }
+        records.append(rec)
+
+    res_df = pd.DataFrame(records)
+    res_df = res_df.sort_values('drift_rate_nu', ascending=False).reset_index(drop=True)
+    res_df['rank'] = np.arange(1, len(res_df) + 1)
+
+    out_dir = os.path.join(_PROJECT_ROOT, 'data', 'leaderboards')
+    os.makedirs(out_dir, exist_ok=True)
+    out_csv = os.path.join(out_dir, f'{year}_ddm_batter_policy.csv')
+    res_df.to_csv(out_csv, index=False)
+    print(f"\n[SUCCESS] Saved DDM Batter Policy Leaderboard ({len(res_df)} batters) to {out_csv}")
+
+    print("\n--- TOP 10 BATTERS BY DDM DRIFT RATE / SENSORY SPEED (2025) ---")
+    print(res_df.head(10)[['rank', 'player_name', 'n_pitches', 'drift_rate_nu', 'boundary_b0', 'collapse_rate_kappa', 't_deadline_ms', 'ddm_policy_archetype']].to_string(index=False))
+
+    return res_df
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run Commit Horizon Inference Analysis")
     parser.add_argument('--year', type=int, default=2025, help="Season to analyze")
     parser.add_argument('--min-pitches', type=int, default=500, help="Minimum pitches to qualify")
+    parser.add_argument('--method', type=str, default='smooth', choices=['smooth', 'ddm', 'both'], help="Analysis method")
     args = parser.parse_args()
 
-    run_commit_horizon_analysis(year=args.year, min_pitches=args.min_pitches)
+    if args.method in ('smooth', 'both'):
+        run_commit_horizon_analysis(year=args.year, min_pitches=args.min_pitches)
+    if args.method in ('ddm', 'both'):
+        run_ddm_analysis(year=args.year, min_pitches=args.min_pitches)

@@ -1,0 +1,7 @@
+# Linguist overrides to ensure repository language is classified as Python
+assets/*.html linguist-generated=true
+assets/**/*.html linguist-generated=true
+notebooks/*.ipynb linguist-documentation=true
+notebooks/**/*.ipynb linguist-documentation=true
+data/*.json linguist-generated=true
+data/leaderboards/*.csv linguist-generated=true
