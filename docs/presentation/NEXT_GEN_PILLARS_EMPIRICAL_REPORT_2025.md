@@ -19,7 +19,7 @@ The standard strike zone perception framework models batter swing decisions agai
 
 1. **Pillar 4 (Retinal Optics & Psychophysics):** Replaces Cartesian $(x, y, z, v_x, v_y, v_z, a_x, a_y, a_z)$ inputs with spherical retinal optic flow $(\theta, \phi, \psi, \dot{\theta}, \dot{\phi}, \dot{\psi}/\psi)$ and Weber-Fechner sensory uncertainty, proving zero leakage of constant Magnus acceleration into initial perception.
 2. **Pillar 1 (Cognitive & Sequential Bayesian Arsenal Fusion):** Models pre-release repertoire priors $\pi_k^{(0)}$ via Dirichlet-Multinomial Bayesian shrinkage and evaluates information-theoretic tunneling deception via closed-form Kullback-Leibler divergence surprise $\mathcal{S}_{\text{tunnel}} = D_{\text{KL}}(P_{0.40} \parallel P_{0.20})$.
-3. **Pillar 2 (Continuous-Time Stochastic Control & Drift-Diffusion):** Formulates decision commitment via a Drift-Diffusion Model (DDM) with dynamic collapsing boundaries, biomechanically anchored to individual Statcast bat-tracking execution windows ($T_{\text{swing}, i} = 2 \cdot \text{swing\_length}_i / (\text{bat\_speed}_i \cdot 1.46667)$).
+3. **Pillar 2 (Continuous-Time Stochastic Control & Drift-Diffusion):** Formulates decision commitment via a Drift-Diffusion Model (DDM) with dynamic collapsing boundaries, biomechanically anchored to individual Statcast bat-tracking execution windows ($T_{\text{swing}, i} \approx 2 \cdot \text{swing length}_i / (\text{bat speed}_i \cdot 1.46667)$).
 4. **Pillar 3 (Individualized Damage Surfaces & Minimax Equilibrium):** Disentangles **Universal Zone Recognition DVA** from **Idiosyncratic Barrel Damage DVA** via an exact additive orthogonal factorization ($|\text{Residual}| < 10^{-16}$) and solves game-theoretic Minimax pitch optimization against individualized damage profiles.
 
 ```mermaid
@@ -45,7 +45,7 @@ Statcast 9-parameter kinematic fits $(x, y, z, v_x, v_y, v_z, a_x, a_y, a_z)$ fi
 We project the 3D Cartesian coordinates to the spherical coordinate system of the batter's eye $\mathbf{p}_{\text{eye}} = (x_{\text{stand}}, y_{\text{plate}} + 1.417, z_{\text{eye}})$:
 - $x_{\text{stand}} = -1.75\text{ ft}$ (RHB in left box) or $+1.75\text{ ft}$ (LHB in right box)
 - $y_{\text{eye}} = 1.417\text{ ft}$ (distance behind front point of plate)
-- $z_{\text{eye}} = \text{sz\_top} + 0.65\text{ ft}$
+- $z_{\text{eye}} = \text{sz top} + 0.65\text{ ft}$
 
 The relative displacement vector and distance are:
 $$\Delta \mathbf{r}(t) = \mathbf{p}(t) - \mathbf{p}_{\text{eye}}, \quad d(t) = \|\Delta \mathbf{r}(t)\|_2$$
@@ -111,7 +111,7 @@ Evaluated on all 724,002 pitches ($N \ge 200$ pitches, 640 pitchers):
 
 ### 4.1 Biomechanical Motor Deadlines
 Rather than assuming an arbitrary static decision horizon, each batter's motor commitment deadline is anchored to verified Statcast bat tracking metrics (`bat_speed` and `swing_length`):
-$$T_{\text{swing}, i} \approx \frac{2 \cdot \text{swing\_length}_i}{\text{bat\_speed}_i \cdot 1.46667}$$
+$$T_{\text{swing}, i} \approx \frac{2 \cdot \text{swing length}_i}{\text{bat speed}_i \cdot 1.46667}$$
 $$T_{\text{deadline}, ij} = T_{\text{plate}, j} - T_{\text{swing}, i}$$
 
 ### 4.2 Dynamic Collapsing Boundary Formulation

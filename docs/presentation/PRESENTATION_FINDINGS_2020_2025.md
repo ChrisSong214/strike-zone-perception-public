@@ -126,7 +126,7 @@ Regressing metrics against linear combinations of `(Z-Swing%, Chase Rate)`:
 
 #### 🔄 Dynamic Trajectory Belief Reversal & Pitcher Deception Repeatability
 To separate true pitch deception from ordinary binomial forecast noise on borderline pitches ($P = 0.60$ landing outside 40% of the time):
-1. **Trajectory Belief Reversal ($\text{belief\_shift}$):** Evaluates the active dynamic drift in early-flight strike belief $\Delta P_{\text{shift}} = P(\text{Strike})_{0.30} - P(\text{Strike})_{0.55}$, measuring whether late break genuinely diverged from the early trajectory vector.
+1. **Trajectory Belief Reversal (`belief_shift`):** Evaluates the active dynamic drift in early-flight strike belief $\Delta P_{\text{shift}} = P(\text{Strike})_{0.30} - P(\text{Strike})_{0.55}$, measuring whether late break genuinely diverged from the early trajectory vector.
 2. **Pitcher Induced Deception Over Expected (`induced_mirage_chase_oe`):** Models batter swing residuals after controlling for early strike probability, Euclidean edge distance, count, and pitch type, shrunk by pitcher via Empirical Bayes.
 3. **Split-Half Reliability:** Testing across odd-game vs. even-game splits for 602 MLB pitchers in 2025 demonstrates that deception is a **statistically significant, repeatable pitcher skill**:
    - `induced_mirage_chase_oe`: $r = 0.233$ ($p = 7.7 \times 10^{-9}$)

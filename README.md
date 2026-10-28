@@ -115,7 +115,7 @@ $$
 
   This eliminates arbitrary thresholding while giving near-zero weight to non-competitive pitches.
 - **Unexplained Linear Variation:** Traditional plate discipline metrics (Z-Swing% and Chase%) explain only 13.5% of the linear variation ($R^2 = 0.135$, non-linear GBDT $R^2 = 0.152$), leaving 86.5% of unexplained linear variation between baseline discipline and pitch tunneling vulnerability.
-- **Trajectory Belief Reversal ($\text{belief\_shift}$):** Quantifies dynamic mid-flight belief shifts $P(\text{Strike})_{0.30} - P(\text{Strike})_{0.55}$, distinguishing late trajectory breaks from static boundary uncertainty.
+- **Trajectory Belief Reversal (`belief_shift`):** Quantifies dynamic mid-flight belief shifts $P(\text{Strike})_{0.30} - P(\text{Strike})_{0.55}$, distinguishing late trajectory breaks from static boundary uncertainty.
 - **Pitcher Deception Over Expected (`induced_mirage_chase_oe`):** Evaluates batter swing residuals beyond count, pitch-type, edge distance, and early strike probability shrunk by pitcher via Empirical Bayes. Odd/even game split-half reliability ($r = 0.233, p = 7.7 \times 10^{-9}$ for deception OE; $r = 0.280, p = 2.7 \times 10^{-12}$ for belief shift across 602 pitchers) demonstrates that deception is a systematic, repeatable pitcher skill.
 
 <p align="center">
@@ -178,7 +178,7 @@ python3 analysis/full_pipeline_holdout_audit.py --year 2025
 To evaluate late movement, biological sensory processing, motor commitment deadlines, and individualized barrel utility:
 - **Pillar 4 (Retinal Optics & Psychophysics):** Projects trajectories to spherical retinal optic flow $(\theta, \phi, \psi, \dot{\theta}, \dot{\phi}, \dot{\psi}/\psi)$ with Weber-Fechner sensory noise injection, deterministically guaranteeing zero acceleration leakage at release ($t=0$). (`src/retinal_physics.py`, `scripts/train_retinal_model.py`)
 - **Pillar 1 (Cognitive & Sequential Bayesian Arsenal Fusion):** Pre-release Dirichlet-Multinomial priors $\pi_k^{(0)}$, multi-hypothesis conjugate Gaussian precision weighting, closed-form KL divergence tunneling deception surprise $\mathcal{S}_{\text{tunnel}}$, and Tunnel Amplification Factor (TAF). (`src/bayesian_tunneling.py`, `scripts/run_bayesian_tunneling.py`)
-- **Pillar 2 (Continuous-Time Stochastic Control & Drift-Diffusion):** Drift-Diffusion Model (DDM) with dynamic collapsing decision boundaries anchored to individual Statcast bat-tracking execution windows ($T_{\text{swing}} = 2 \cdot \text{swing\_length} / (\text{bat\_speed} \cdot 1.46667)$). (`src/drift_diffusion.py`, `scripts/run_commit_horizon.py --method ddm`)
+- **Pillar 2 (Continuous-Time Stochastic Control & Drift-Diffusion):** Drift-Diffusion Model (DDM) with dynamic collapsing decision boundaries anchored to individual Statcast bat-tracking execution windows ($T_{\text{swing}} \approx 2 \cdot \text{swing length} / (\text{bat speed} \cdot 1.46667)$). (`src/drift_diffusion.py`, `scripts/run_commit_horizon.py --method ddm`)
 - **Pillar 3 (Individualized Damage Surfaces & Minimax Equilibrium):** Disentangles Universal Zone Recognition DVA from Idiosyncratic Barrel Damage DVA via exact additive orthogonal decomposition ($|\text{Residual}| < 10^{-16}$) and solves game-theoretic Minimax pitch selection. (`src/personalized_utility.py`, `scripts/run_personalized_dva.py`)
 - **Empirical Report:** Comprehensive findings on the 2025 MLB dataset in [`docs/presentation/NEXT_GEN_PILLARS_EMPIRICAL_REPORT_2025.md`](docs/presentation/NEXT_GEN_PILLARS_EMPIRICAL_REPORT_2025.md).
 

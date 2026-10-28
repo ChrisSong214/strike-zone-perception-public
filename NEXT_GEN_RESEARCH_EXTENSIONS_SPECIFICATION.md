@@ -125,7 +125,7 @@ Discrete multi-step horizon searches ($\tau \in \{0.25, \dots, 0.55\}$) approxim
 
 2. **Biomechanically Anchored Dynamic Boundaries:**
    Let $T_{\text{plate}}$ denote total flight time. The physical execution window $T_{\text{swing}, i}$ is derived from Statcast bat metrics:
-   $$T_{\text{swing}, i} \approx \frac{2 \cdot \text{swing\_length}_i}{\text{bat\_speed}_i}$$
+   $$T_{\text{swing}, i} \approx \frac{2 \cdot \text{swing length}_i}{\text{bat speed}_i}$$
    The motor commitment deadline is $T_{\text{deadline}, ij} = T_{\text{plate}, j} - T_{\text{swing}, i}$.
    The decision boundaries collapse toward zero as the deadline nears:
    $$B_i(t) = \pm B_{0, i} \left(1 - \kappa_i \frac{t}{T_{\text{deadline}, ij}}\right)_+^{\gamma_i}$$
